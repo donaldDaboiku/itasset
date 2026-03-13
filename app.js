@@ -2387,6 +2387,7 @@ function initSync() {
 // Valid license keys — replace/add your real Gumroad keys here
 // Format: ITAT-XXXX-XXXX-XXXX  (ITAssetTrack prefix)
 const VALID_LICENSES = [
+    '6F0E4C97-B72A4E69-A11BF6C4-AF6517E7',
   // These are the keys you generate and embed per sale
   // For Gumroad: use their license key API or embed static keys
   'ITAT-2024-PRO1-BETA',
