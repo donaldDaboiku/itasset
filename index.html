@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITAssetTrack</title>
+<link rel="icon" type="image/png" sizes="16x16" href="icons/ITAssetTrack-appicon-cyan-16px.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/ITAssetTrack-appicon-cyan-32px.png">
+<link rel="apple-touch-icon" sizes="256x256" href="icons/ITAssetTrack-appicon-cyan-256px.png">
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+ 
+<script>
+  // Silence Five Server live-reload websocket noise if injected.
+  (function() {
+    const NativeWebSocket = window.WebSocket;
+    if (!NativeWebSocket) return;
+    window.WebSocket = function(url, protocols) {
+      if (typeof url === 'string' && url.includes('/fsws')) {
+        return {
+          readyState: 3,
+          close: function() {},
+          send: function() {},
+          addEventListener: function() {},
+          removeEventListener: function() {}
+        };
+      }
+      return protocols ? new NativeWebSocket(url, protocols) : new NativeWebSocket(url);
+    };
+    window.WebSocket.prototype = NativeWebSocket.prototype;
+  })();
+</script>
+<script>
+  // Clear any previously-registered service workers on this origin
+  // to avoid stale cached assets during local development.
+  if ('serviceWorker' in navigator && sessionStorage.getItem('sw-cleared') !== '1') {
+    sessionStorage.setItem('sw-cleared', '1');
+    navigator.serviceWorker.getRegistrations()
+      .then(regs => Promise.all(regs.map(r => r.unregister())))
+      .then(() => {
+        if (navigator.serviceWorker.controller) window.location.reload();
+      })
+      .catch(() => {});
+  }
+</script>
+
+<!-- ── LICENSE GATE ── -->
+<div id="license-screen" class="visible">
+  <div class="license-box">
+    <div class="license-logo"><img src="icons/ITAssetTrack-appicon-cyan-128px.png" alt="ITAssetTrack"></div>
+    <div class="license-badge">✦ ITAssetTrack v1.0 — Licensed Edition</div>
+    <h2>Activate Your License</h2>
+    <p>Enter the license key you received after purchasing on Gumroad to unlock ITAssetTrack. Your key is in your purchase confirmation email.</p>
+
+    <div id="license-error" class="license-error"></div>
+    <div id="license-success" class="license-success"></div>
+
+    <div class="license-input-wrap">
+      <input type="text" id="license-key-input" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="24" oninput="formatLicenseKey(this)" autocomplete="off" spellcheck="false">
+    </div>
+    <button class="license-btn" onclick="activateLicense()">🔓 Activate License</button>
+
+    <div class="license-divider"></div>
+
+    <button class="trial-btn" onclick="startTrial()">⏳ Start 7-Day Free Trial</button>
+    <div class="trial-note" id="trial-note">No license key required. Trial includes all features.</div>
+
+    <div class="license-footer">
+      Don't have a license? <a href="https://itassettrack.gumroad.com/l/itassettrack" target="_blank">Purchase on Gumroad →</a><br>
+      Having issues? Contact <a href="mailto:support@itassettrack.com">support@itassettrack.com</a>
+    </div>
+  </div>
+</div>
+
+<!-- ── LOGIN SCREEN ── -->
+<div id="login-screen" class="visible">
+  <div class="login-bg"></div>
+  <div class="login-grid">
+    <!-- Left panel -->
+    <div class="login-left">
+      <div class="login-brand">
+        <div class="login-brand-icon"><img src="icons/ITAssetTrack-appicon-cyan-128px.png" alt="ITAssetTrack"></div>
+        <div>
+          <div class="login-brand-name">ITAssetTrack</div>
+          <div class="login-brand-sub">Track Every Device. Always.</div>
+        </div>
+      </div>
+      <div class="login-hero">
+        <h1>Manage your <span>IT assets</span> with confidence</h1>
+        <p>A complete lifecycle management system for tracking, assigning, and auditing all your organisation's devices — offline, secure, and always available.</p>
+        <div class="login-features">
+          <div class="login-feature"><div class="login-feature-dot"></div>Full device inventory with QR codes</div>
+          <div class="login-feature"><div class="login-feature-dot"></div>Assignment & reassignment tracking</div>
+          <div class="login-feature"><div class="login-feature-dot"></div>Complete audit history log</div>
+          <div class="login-feature"><div class="login-feature-dot"></div>CSV/Excel import & export</div>
+          <div class="login-feature"><div class="login-feature-dot"></div>Printable asset labels</div>
+          <div class="login-feature"><div class="login-feature-dot"></div>Works 100% offline — no internet needed</div>
+        </div>
+      </div>
+      <div class="login-left-footer">v1.0.0 · Local Storage · Single-User Edition</div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="login-right">
+      <h2>Welcome back</h2>
+      <p class="login-sub">Sign in to your ITAssetTrack account to continue</p>
+
+      <div class="login-tabs">
+        <button class="login-tab active" onclick="switchLoginTab(this,'tab-signin')">Sign In</button>
+        <button class="login-tab" onclick="switchLoginTab(this,'tab-register')">Register</button>
+      </div>
+
+      <!-- Sign In -->
+      <div id="tab-signin" class="login-panel active">
+        <div id="signin-error" class="login-error"></div>
+        <div class="login-form-group">
+          <label>Username</label>
+          <input type="text" id="signin-user" placeholder="Enter your username" autocomplete="username">
+        </div>
+        <div class="login-form-group">
+          <label>Password</label>
+          <input type="password" id="signin-pass" placeholder="Enter your password" autocomplete="current-password">
+        </div>
+        <button class="login-btn" onclick="doSignIn()">Sign In →</button>
+        <div class="login-hint">
+          🔑 Default credentials:<br>
+          Username: <strong style="color:var(--accent)">admin</strong> &nbsp;·&nbsp; Password: <strong style="color:var(--accent)">admin123</strong>
+        </div>
+      </div>
+
+      <!-- Register -->
+      <div id="tab-register" class="login-panel">
+        <div id="register-error" class="login-error"></div>
+        <div class="login-form-group">
+          <label>Full Name</label>
+          <input type="text" id="reg-name" placeholder="Your full name">
+        </div>
+        <div class="login-form-group">
+          <label>Username</label>
+          <input type="text" id="reg-user" placeholder="Choose a username">
+        </div>
+        <div class="login-form-group">
+          <label>Password</label>
+          <input type="password" id="reg-pass" placeholder="Choose a password (min 6 chars)">
+        </div>
+        <div class="login-form-group">
+          <label>Confirm Password</label>
+          <input type="password" id="reg-pass2" placeholder="Repeat password">
+        </div>
+        <button class="login-btn" onclick="doRegister()">Create Account →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sidebar -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-badge">
+      <div class="logo-icon"><img src="icons/ITAssetTrack-appicon-cyan-128px.png" alt="ITAssetTrack"></div>
+      <div class="logo-text">ITAssetTrack</div>
+    </div>
+    <div class="logo-sub">Asset Management</div>
+  </div>
+
+  <div class="sidebar-nav">
+    <div class="nav-section">Main</div>
+    <div class="nav-item active" data-page="dashboard">
+      <span class="nav-icon">📊</span> Dashboard
+    </div>
+    <div class="nav-item" data-page="inventory">
+      <span class="nav-icon">🗃️</span> Inventory
+    </div>
+
+    <div class="nav-section">Operations</div>
+    <div class="nav-item" data-page="tasks">
+      <span class="nav-icon">✅</span> Task Log <span id="task-badge" style="margin-left:auto;background:var(--orange);color:#000;font-size:9px;font-weight:700;font-family:var(--mono);padding:1px 6px;border-radius:10px;display:none;">0</span>
+    </div>
+    <div class="nav-item" data-page="assign">
+      <span class="nav-icon">🔗</span> Assign Device
+    </div>
+    <div class="nav-item" data-page="faulty">
+      <span class="nav-icon">⚠️</span> Faulty Tracking
+    </div>
+    <div class="nav-item" data-page="history">
+      <span class="nav-icon">📋</span> History Log
+    </div>
+
+    <div class="nav-section">System</div>
+    <div class="nav-item" data-page="reports">
+      <span class="nav-icon">📁</span> Reports
+    </div>
+    <div class="nav-item" data-page="settings">
+      <span class="nav-icon">⚙️</span> Settings
+    </div>
+  </div>
+
+  <div class="sidebar-footer" id="sidebar-footer">
+    ITAssetTrack v1.0 · Licensed
+  </div>
+</nav>
+
+<!-- Main Content -->
+<div id="main">
+  <div class="topbar">
+    <div class="topbar-title" id="topbar-title">Dashboard <span>/ Overview</span></div>
+    <div class="offline-badge is-offline" id="offline-badge" title="Local-first: works without internet">
+      <span class="offline-dot"></span>
+      <span class="offline-badge-text">Offline Ready</span>
+    </div>
+    <div class="topbar-search">
+      <span>🔍</span>
+      <input type="text" id="global-search" placeholder="Search devices, tags, serials…">
+    </div>
+    <button class="topbar-btn primary" id="topbar-add-btn" onclick="openAddModal()">+ Add Device</button>
+    <button class="topbar-btn" onclick="openImportModal()" style="border-color:var(--green);color:var(--green);">📂 Import Excel/CSV</button>
+    <button class="topbar-btn" onclick="exportCSV()">📥 Export</button>
+
+    <!-- User dropdown -->
+    <div class="topbar-user" id="topbar-user">
+      <div class="user-pill" onclick="toggleUserDropdown()">
+        <div class="user-avatar" id="topbar-avatar">AD</div>
+        <div>
+          <div class="user-name" id="topbar-username">Admin</div>
+          <div class="user-role">Administrator</div>
+        </div>
+        <span style="font-size:10px;color:var(--text3);margin-left:2px;">▾</span>
+      </div>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="ud-header">
+          <div class="ud-name" id="ud-fullname">Administrator</div>
+          <div class="ud-email" id="ud-uname">admin</div>
+        </div>
+        <div class="ud-item" onclick="navigate('settings');closeUserDropdown()">⚙️ Settings</div>
+        <div class="ud-item" onclick="openImportModal();closeUserDropdown()">📂 Import Data</div>
+        <div class="ud-item" onclick="exportCSV('all');closeUserDropdown()">📥 Export Inventory</div>
+        <div class="ud-divider"></div>
+        <div class="ud-item" onclick="navigate('settings');closeUserDropdown()">👤 Manage Account</div>
+        <div class="ud-item danger" onclick="doSignOut()">🚪 Sign Out</div>
+      </div>
+    </div>
+  </div>
+  <!-- Sync Bar -->
+  <div id="sync-bar" class="sync-bar">
+    <div class="sync-dot local" id="sync-dot"></div>
+    <span class="sync-text" id="sync-text">Google Sheets: Not configured</span>
+    <span class="sync-time" id="sync-time"></span>
+    <button class="sync-btn" onclick="pullFromSheets().then(ok=>{if(ok){renderInventory();updateDashboard();renderHistory();renderFaulty();refreshAssignSelects();updateFaultyBadge();}})">⟳ Sync Now</button>
+    <button class="sync-btn" onclick="openSetupWizard()" style="border-color:var(--accent);color:var(--accent);">⚙ Configure</button>
+  </div>
+
+  <div class="content">
+
+    <!-- ── DASHBOARD ── -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-hdr">
+        <div>
+          <h2>Dashboard</h2>
+          <p>Real-time overview of all IT assets</p>
+        </div>
+        <div class="flex-row">
+          <div class="chip">🟢 System Online</div>
+          <div class="chip" id="last-sync">Last sync: just now</div>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card total">
+          <div class="kpi-label">Total Devices</div>
+          <div class="kpi-value" id="kpi-total">0</div>
+          <div class="kpi-sub">In inventory</div>
+          <div class="kpi-icon">🖥️</div>
+        </div>
+        <div class="kpi-card assigned">
+          <div class="kpi-label">Assigned</div>
+          <div class="kpi-value" id="kpi-assigned">0</div>
+          <div class="kpi-sub">Active assignments</div>
+          <div class="kpi-icon">✅</div>
+        </div>
+        <div class="kpi-card available">
+          <div class="kpi-label">Available</div>
+          <div class="kpi-value" id="kpi-available">0</div>
+          <div class="kpi-sub">Ready to assign</div>
+          <div class="kpi-icon">📦</div>
+        </div>
+        <div class="kpi-card faulty">
+          <div class="kpi-label">Faulty</div>
+          <div class="kpi-value" id="kpi-faulty">0</div>
+          <div class="kpi-sub">Need attention</div>
+          <div class="kpi-icon">🔧</div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Device Distribution</div>
+            <div class="chip">Live</div>
+          </div>
+          <div class="chart-container">
+            <canvas id="dashboard-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Asset Overview</div>
+          </div>
+          <div id="dept-stats">
+            <div class="empty-state"><div class="es-icon">📊</div><p>Add devices to see stats</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;" class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Recent Activity</div>
+          <button class="btn btn-outline btn-sm" onclick="navigate('history')">View All →</button>
+        </div>
+        <div id="recent-activity">
+          <div class="empty-state"><div class="es-icon">📋</div><p>No activity yet</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── INVENTORY ── -->
+    <div id="page-inventory" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>Inventory</h2>
+          <p>All registered IT assets</p>
+        </div>
+        <div class="flex-row">
+          <input type="text" id="inv-search" placeholder="Search inventory…" style="width:220px;padding:8px 12px;font-size:13px;" oninput="renderInventory()">
+          <select id="inv-category-filter" onchange="renderInventory()" style="width:180px;padding:8px 10px;font-size:13px;">
+            <option value="all">All Categories</option>
+            <option value="Laptop">Laptop</option>
+            <option value="Desktop">Desktop</option>
+            <option value="Monitor">Monitor</option>
+            <option value="Printer">Printer</option>
+            <option value="Tablet">Tablet</option>
+            <option value="Phone">Phone</option>
+            <option value="Server">Server</option>
+            <option value="Network Equipment">Network Equipment</option>
+            <option value="External Storage">External Storage</option>
+            <option value="Biometric">Biometric</option>
+            <option value="Other">Other</option>
+          </select>
+          <button class="btn btn-outline" onclick="openImportModal()" style="border-color:var(--green);color:var(--green);">📂 Import</button>
+          <button class="btn btn-primary" onclick="openAddModal()">+ Add Device</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="inventory-table">
+          <thead>
+            <tr>
+              <th>Asset Tag</th>
+              <th>Device Name</th>
+              <th>Serial Number</th>
+              <th>Specs</th>
+              <th>Department</th>
+              <th>Status</th>
+              <th>Assigned User</th>
+              <th>QR Code</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="inventory-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── ASSIGN ── -->
+    <div id="page-assign" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>Assign / Reassign Device</h2>
+          <p>Manage device assignments and ownership transfers</p>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(this,'assign-tab')">Assign Device</button>
+        <button class="tab-btn" onclick="switchTab(this,'reassign-tab')">Reassign Device</button>
+      </div>
+
+      <div id="assign-tab" class="tab-panel active">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+          <div class="panel">
+            <div class="panel-title" style="margin-bottom:18px;">Assign to User</div>
+            <div class="form-group" style="margin-bottom:14px;">
+              <label>Select Device (Available only)</label>
+              <select id="assign-device-select">
+                <option value="">-- Choose device --</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+              <label>User Name</label>
+              <input type="text" id="assign-user" placeholder="Full name of user">
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+              <label>Department</label>
+              <input type="text" id="assign-dept" placeholder="Department name">
+            </div>
+            <button class="btn btn-success" onclick="assignDevice()" style="width:100%;justify-content:center;margin-top:8px;">✅ Assign Device</button>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title" style="margin-bottom:18px;">Currently Assigned</div>
+            <div id="assigned-list">
+              <div class="empty-state"><div class="es-icon">🔗</div><p>No assigned devices</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="reassign-tab" class="tab-panel">
+        <div class="panel" style="max-width:520px;">
+          <div class="panel-title" style="margin-bottom:18px;">Reassign to New User</div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label>Select Assigned Device</label>
+            <select id="reassign-device-select">
+              <option value="">-- Choose assigned device --</option>
+            </select>
+          </div>
+          <div id="reassign-current-info" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--text2);">
+            Currently assigned to: <strong id="reassign-current-user" style="color:var(--text)"></strong>
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label>New User Name</label>
+            <input type="text" id="reassign-user" placeholder="Full name of new user">
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label>New Department</label>
+            <input type="text" id="reassign-dept" placeholder="Department name">
+          </div>
+          <button class="btn btn-warning" onclick="reassignDevice()" style="width:100%;justify-content:center;margin-top:8px;">🔄 Reassign Device</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FAULTY ── -->
+    <div id="page-faulty" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>Faulty Device Tracking</h2>
+          <p>Mark and monitor devices requiring repairs</p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:400px 1fr;gap:24px;">
+        <div class="panel">
+          <div class="panel-title" style="margin-bottom:18px;">Mark as Faulty</div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label>Select Device</label>
+            <select id="faulty-device-select">
+              <option value="">-- Choose device --</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label>Fault Description</label>
+            <textarea id="faulty-desc" rows="3" placeholder="Describe the issue…" style="resize:vertical;"></textarea>
+          </div>
+          <button class="btn btn-danger" onclick="markFaulty()" style="width:100%;justify-content:center;">⚠️ Mark as Faulty</button>
+        </div>
+
+        <div>
+          <div class="panel-title" style="margin-bottom:14px;font-size:11px;letter-spacing:1.5px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;">Faulty Devices</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Asset Tag</th><th>Device</th><th>Serial</th><th>Prev. User</th><th>Actions</th></tr></thead>
+              <tbody id="faulty-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── HISTORY ── -->
+    <div id="page-history" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>History Log</h2>
+          <p>Full audit trail of all device activities</p>
+        </div>
+        <div class="flex-row">
+          <input type="text" id="history-search" placeholder="Filter history…" style="width:200px;padding:8px 12px;font-size:13px;" oninput="renderHistory()">
+          <select id="history-filter" onchange="renderHistory()" style="padding:8px 12px;font-size:13px;width:160px;">
+            <option value="">All Actions</option>
+            <option value="Added">Added</option>
+            <option value="Assigned">Assigned</option>
+            <option value="Reassigned">Reassigned</option>
+            <option value="Faulty">Faulty</option>
+            <option value="Restored">Restored</option>
+            <option value="Ticket">Ticket/Repair</option>
+            <option value="Updated">Updated</option>
+            <option value="Returned">Returned</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Date & Time</th>
+              <th>Asset Tag</th>
+              <th>Serial Number</th>
+              <th>Action</th>
+              <th>User</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── REPORTS ── -->
+    <div id="page-reports" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>Reports & Exports</h2>
+          <p>Export data for analysis and compliance</p>
+        </div>
+      </div>
+
+      <div style="max-width:640px;">
+        <div class="report-card" onclick="exportCSV('all')">
+          <div class="report-icon" style="background:var(--blue-dim);">📊</div>
+          <div>
+            <h4>Full Inventory Export</h4>
+            <p>Export all devices with status, assignment, and department info as CSV</p>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">Export CSV</button>
+        </div>
+        <div class="report-card" onclick="exportCSV('assigned')">
+          <div class="report-icon" style="background:var(--green-dim);">✅</div>
+          <div>
+            <h4>Assigned Devices Report</h4>
+            <p>Export currently assigned devices with user and department info</p>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">Export CSV</button>
+        </div>
+        <div class="report-card" onclick="exportCSV('available')">
+          <div class="report-icon" style="background:var(--accent-glow);">📦</div>
+          <div>
+            <h4>Available Devices Report</h4>
+            <p>Export devices ready for assignment</p>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">Export CSV</button>
+        </div>
+        <div class="report-card" onclick="exportCSV('faulty')">
+          <div class="report-icon" style="background:var(--red-dim);">⚠️</div>
+          <div>
+            <h4>Faulty Devices Report</h4>
+            <p>Export all devices marked as faulty for maintenance tracking</p>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">Export CSV</button>
+        </div>
+        <div class="report-card" onclick="exportHistoryCSV()">
+          <div class="report-icon" style="background:var(--orange-dim);">📋</div>
+          <div>
+            <h4>History / Audit Log</h4>
+            <p>Export full audit trail of all device activities</p>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">Export CSV</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="settings-section" style="background:var(--surface2);">
+          <div class="settings-title">📊 Quick Summary</div>
+          <div id="report-summary"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ── -->
+    <div id="page-settings" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>Settings</h2>
+          <p>Configure system preferences and asset numbering</p>
+        </div>
+      </div>
+
+      <div style="max-width:640px;">
+        <div class="settings-section">
+          <div class="settings-title">🏷️ Asset Tag Configuration</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Tag Prefix</label>
+              <input type="text" id="s-prefix" placeholder="e.g. IT, ICT, LAP" maxlength="6">
+            </div>
+            <div class="form-group">
+              <label>Starting Number</label>
+              <input type="number" id="s-start" placeholder="e.g. 1" min="1">
+            </div>
+            <div class="form-group">
+              <label>Number Padding (digits)</label>
+              <input type="number" id="s-padding" placeholder="e.g. 4" min="1" max="8">
+            </div>
+            <div class="form-group">
+              <label>Current Counter</label>
+              <input type="number" id="s-counter" min="1">
+            </div>
+          </div>
+          <div class="tag-preview">
+            Preview: <strong id="tag-preview-val">IT-0001</strong>
+            <span style="color:var(--text3);margin-left:16px;font-size:11px;">Next: <span id="tag-preview-next">IT-0002</span></span>
+          </div>
+          <button class="btn btn-primary mt-16" onclick="saveSettings()">💾 Save Settings</button>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-title">🗑️ Data Management</div>
+          <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">Manage stored data. These actions cannot be undone.</p>
+          <div class="flex-row" style="margin-bottom:12px;">
+            <button class="btn btn-outline" onclick="exportCSV('all')">📥 Backup Inventory</button>
+            <button class="btn btn-outline" onclick="exportHistoryCSV()">📥 Backup History</button>
+          </div>
+          <div class="flex-row">
+            <button class="btn btn-warning" onclick="confirmRemoveImported()">🧹 Remove Imported Devices</button>
+            <button class="btn btn-danger" onclick="confirmClear()">🗑️ Clear All Data</button>
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:var(--text3);">
+            "Remove Imported" deletes only devices added via the Import feature, keeping manually-added devices safe.
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-title">👤 Account Management</div>
+          <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">Change your login credentials.</p>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>New Username</label>
+              <input type="text" id="s-new-username" placeholder="Leave blank to keep current">
+            </div>
+            <div class="form-group">
+              <label>Current Password</label>
+              <input type="password" id="s-cur-pass" placeholder="Required to make changes">
+            </div>
+            <div class="form-group">
+              <label>New Password</label>
+              <input type="password" id="s-new-pass" placeholder="Leave blank to keep current">
+            </div>
+            <div class="form-group">
+              <label>Confirm New Password</label>
+              <input type="password" id="s-new-pass2" placeholder="Repeat new password">
+            </div>
+          </div>
+          <div id="account-msg" style="display:none;margin-top:10px;font-size:12.5px;padding:9px 13px;border-radius:7px;"></div>
+          <button class="btn btn-primary mt-16" onclick="updateAccount()">💾 Update Credentials</button>
+          <div class="divider"></div>
+          <button class="btn btn-danger" onclick="doSignOut()">🚪 Sign Out</button>
+        </div>
+        <div class="settings-section">
+          <div class="settings-title">📊 Google Sheets Sync</div>
+          <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">Connect to Google Sheets so all IT staff can access and update the same device inventory in real time.</p>
+          <div id="sheets-settings-content">
+            <!-- Rendered by renderSheetsSettings() -->
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-title">🔮 Planned Features</div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.9;">
+            <div>🔄 Staff / User database integration</div>
+            <div>🔧 Device repair & maintenance logs</div>
+            <div>📅 Warranty expiry tracking & alerts</div>
+            <div>📊 Department-level usage reports</div>
+            <div>📷 QR code scanning for quick lookup</div>
+            <div>🔐 Multi-user authentication & roles</div>
+            <div>🌙 Dark / Light mode toggle</div>
+            <div>💻 Electron desktop app packaging</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ── TASKS ── -->
+    <div id="page-tasks" class="page">
+      <div class="page-hdr">
+        <div>
+          <h2>Task Log</h2>
+          <p>Daily, weekly and monthly IT task tracking for your team</p>
+        </div>
+        <div class="flex-row">
+          <div class="period-tabs">
+            <button class="period-tab active" data-period="day" onclick="switchPeriod(this)">Today</button>
+            <button class="period-tab" data-period="week" onclick="switchPeriod(this)">This Week</button>
+            <button class="period-tab" data-period="month" onclick="switchPeriod(this)">This Month</button>
+            <button class="period-tab" data-period="all" onclick="switchPeriod(this)">All</button>
+          </div>
+          <button class="btn btn-primary" onclick="openTaskModal()">+ New Task</button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="task-stats" id="task-stats-bar"></div>
+
+      <!-- Filter bar -->
+      <div class="task-filter-bar">
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px;">Filter:</span>
+        <button class="task-filter-btn active" data-filter="all" onclick="setTaskFilter(this)">All</button>
+        <button class="task-filter-btn" data-filter="pending" onclick="setTaskFilter(this)">Pending</button>
+        <button class="task-filter-btn" data-filter="progress" onclick="setTaskFilter(this)">In Progress</button>
+        <button class="task-filter-btn" data-filter="done" onclick="setTaskFilter(this)">Completed</button>
+        <button class="task-filter-btn" data-filter="overdue" onclick="setTaskFilter(this)">⚠ Overdue</button>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          <input type="text" id="task-search" placeholder="Search tasks…" style="width:180px;padding:6px 12px;font-size:12px;" oninput="renderTaskBoard()">
+          <select id="task-assignee-filter" onchange="renderTaskBoard()" style="padding:6px 10px;font-size:12px;width:150px;">
+            <option value="">All Assignees</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Board -->
+      <div class="task-board" id="task-board">
+        <div class="task-col pending">
+          <div class="task-col-hdr">
+            <div class="task-col-title">⏳ Pending <span class="task-col-count" id="col-count-pending">0</span></div>
+          </div>
+          <div id="col-pending"></div>
+        </div>
+        <div class="task-col progress">
+          <div class="task-col-hdr">
+            <div class="task-col-title">🔵 In Progress <span class="task-col-count" id="col-count-progress">0</span></div>
+          </div>
+          <div id="col-progress"></div>
+        </div>
+        <div class="task-col done">
+          <div class="task-col-hdr">
+            <div class="task-col-title">✅ Completed <span class="task-col-count" id="col-count-done">0</span></div>
+          </div>
+          <div id="col-done"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- ── ADD DEVICE MODAL ── -->
+<div class="modal-overlay" id="modal-add">
+  <div class="modal modal-lg" style="width:760px;">
+    <h3>➕ Add New Device</h3>
+    <p>Register a new IT asset with full specifications</p>
+    <div class="modal-body-scroll">
+
+      <!-- Section: Identity -->
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:10px;">📋 Identity</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Asset Tag (Auto)</label>
+          <input type="text" id="f-tag" placeholder="Auto-generated" readonly style="color:var(--accent);font-family:var(--mono);">
+        </div>
+        <div class="form-group">
+          <label>Old / Previous Tag</label>
+          <input type="text" id="f-oldtag" placeholder="e.g. MSH-001">
+        </div>
+        <div class="form-group">
+          <label>Device Name / Model <span style="color:var(--red)">*</span></label>
+          <input type="text" id="f-name" placeholder="e.g. HP EliteBook 840 G9">
+        </div>
+        <div class="form-group">
+          <label>Brand / Manufacturer</label>
+          <input type="text" id="f-brand" placeholder="e.g. HP, Dell, Lenovo">
+        </div>
+        <div class="form-group">
+          <label>Serial Number <span style="color:var(--red)">*</span></label>
+          <input type="text" id="f-serial" placeholder="e.g. 5CG2040KLM">
+        </div>
+        <div class="form-group">
+          <label>Device Category</label>
+          <select id="f-category">
+            <option>Laptop</option><option>Desktop</option><option>Monitor</option>
+            <option>Printer</option><option>Tablet</option><option>Phone</option>
+            <option>Server</option><option>Network Equipment</option>
+            <option>External Storage</option><option>Biometric</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Condition</label>
+          <select id="f-condition">
+            <option value="excellent">Excellent</option>
+            <option value="good" selected>Good</option>
+            <option value="fair">Fair</option>
+            <option value="poor">Poor</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Operating System</label>
+          <input type="text" id="f-os" placeholder="e.g. Windows 11 Pro">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Section: Specs -->
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:10px;">⚙️ Specifications</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Processor / CPU</label>
+          <input type="text" id="f-processor" placeholder="e.g. Intel Core i7-1265U">
+        </div>
+        <div class="form-group">
+          <label>Generation</label>
+          <input type="text" id="f-generation" placeholder="e.g. 12th Gen">
+        </div>
+        <div class="form-group">
+          <label>RAM (GB)</label>
+          <input type="number" id="f-ram" placeholder="e.g. 16" min="0">
+        </div>
+        <div class="form-group">
+          <label>ROM / Internal Storage (GB)</label>
+          <input type="number" id="f-rom" placeholder="e.g. 256" min="0">
+        </div>
+        <div class="form-group">
+          <label>Disk Size / HDD (GB)</label>
+          <input type="number" id="f-disk" placeholder="e.g. 1000" min="0">
+        </div>
+        <div class="form-group">
+          <label>Display Size (inches)</label>
+          <input type="text" id="f-display" placeholder="e.g. 15.6">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Section: Assignment & Dates -->
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:10px;">👤 Assignment & Dates</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Department</label>
+          <input type="text" id="f-dept" placeholder="e.g. Finance, IT, HR">
+        </div>
+        <div class="form-group">
+          <label>Assigned User</label>
+          <input type="text" id="f-assigneduser" placeholder="Full name of user">
+        </div>
+        <div class="form-group">
+          <label>Date Purchased</label>
+          <input type="date" id="f-purchase">
+        </div>
+        <div class="form-group">
+          <label>Date Received</label>
+          <input type="date" id="f-received">
+        </div>
+        <div class="form-group">
+          <label>Date Assigned / Issued</label>
+          <input type="date" id="f-assigned-date">
+        </div>
+        <div class="form-group">
+          <label>Date Returned <span style="color:var(--text3);font-weight:400;">(if returned)</span></label>
+          <input type="date" id="f-returned">
+        </div>
+        <div class="form-group">
+          <label>Warranty Expiry Date</label>
+          <input type="date" id="f-warranty">
+        </div>
+        <div class="form-group">
+          <label>Expected End-of-Life Date</label>
+          <input type="date" id="f-eol">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Section: Financial -->
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:10px;">💰 Financial</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Purchase Value / Cost (₦)</label>
+          <input type="number" id="f-value" placeholder="e.g. 450000" min="0">
+        </div>
+        <div class="form-group">
+          <label>Current Value (₦) <span style="color:var(--text3);font-weight:400;">(optional)</span></label>
+          <input type="number" id="f-curvalue" placeholder="Auto-estimated if blank" min="0">
+        </div>
+        <div class="form-group">
+          <label>Supplier / Vendor</label>
+          <input type="text" id="f-supplier" placeholder="e.g. TechMart Ltd">
+        </div>
+        <div class="form-group">
+          <label>Invoice / PO Number</label>
+          <input type="text" id="f-invoice" placeholder="e.g. INV-2024-0042">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Section: Notes -->
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:10px;">📝 Notes</div>
+      <div class="form-group">
+        <label>Additional Notes</label>
+        <textarea id="f-notes" rows="2" placeholder="Any additional information about this device…" style="resize:vertical;"></textarea>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add')">Cancel</button>
+      <button class="btn btn-primary" onclick="addDevice()">✅ Add to Inventory</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── DEVICE DETAIL MODAL ── -->
+<div class="modal-overlay" id="modal-detail">
+  <div class="modal modal-lg" style="width:820px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+      <h3 style="margin:0;">🖥️ Device Details</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="value-pill" id="dd-value-pill" style="display:none;"></span>
+        <button class="btn btn-outline btn-sm" onclick="openEditDeviceModal(currentDetailId)">✏️ Edit</button>
+        <button class="btn btn-outline btn-sm" onclick="printLabel(currentDetailId)">🖨️ Label</button>
+      </div>
+    </div>
+    <p id="detail-subtitle" style="margin-bottom:14px;"></p>
+
+    <!-- Tabs -->
+    <div class="detail-tabs">
+      <button class="detail-tab active" onclick="switchDetailTab(this,'dtab-info')">📋 Info</button>
+      <button class="detail-tab" onclick="switchDetailTab(this,'dtab-specs')">⚙️ Specs</button>
+      <button class="detail-tab" onclick="switchDetailTab(this,'dtab-finance')">💰 Finance</button>
+      <button class="detail-tab" onclick="switchDetailTab(this,'dtab-tickets')">🎫 Tickets <span id="ticket-count-badge" style="background:var(--red);color:#000;font-size:9px;font-family:var(--mono);padding:1px 5px;border-radius:8px;margin-left:4px;display:none;"></span></button>
+      <button class="detail-tab" onclick="switchDetailTab(this,'dtab-history')">📜 History</button>
+    </div>
+
+    <div class="modal-body-scroll">
+
+      <!-- TAB: INFO -->
+      <div id="dtab-info" class="detail-tab-panel active">
+        <div style="display:grid;grid-template-columns:1fr 130px;gap:20px;">
+          <div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+              <span id="dd-status-badge"></span>
+              <span id="dd-condition-badge"></span>
+              <span id="dd-warranty-note" style="font-size:11px;font-family:var(--mono);color:var(--text3);"></span>
+            </div>
+            <div class="detail-grid" id="detail-grid-info"></div>
+          </div>
+          <div style="text-align:center;">
+            <div id="detail-qr" style="margin-bottom:8px;"></div>
+            <div style="font-size:10px;color:var(--text3);font-family:var(--mono);">Scan to view</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SPECS -->
+      <div id="dtab-specs" class="detail-tab-panel">
+        <div class="detail-grid" id="detail-grid-specs"></div>
+      </div>
+
+      <!-- TAB: FINANCE -->
+      <div id="dtab-finance" class="detail-tab-panel">
+        <div class="detail-grid" id="detail-grid-finance"></div>
+        <div id="dd-depr-wrap" style="margin-top:18px;display:none;">
+          <div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Estimated Remaining Value</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="depr-bar-wrap" style="flex:1;"><div class="depr-bar" id="dd-depr-bar"></div></div>
+            <span id="dd-depr-pct" style="font-size:12px;font-family:var(--mono);color:var(--text2);"></span>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;" id="dd-depr-note"></div>
+        </div>
+        <div style="margin-top:18px;">
+          <div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Repair / Ticket Costs Summary</div>
+          <div id="dd-cost-summary"></div>
+        </div>
+      </div>
+
+      <!-- TAB: TICKETS -->
+      <div id="dtab-tickets" class="detail-tab-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div style="font-size:12px;color:var(--text2);">Log complaints, repairs, upgrades and maintenance</div>
+          <button class="btn btn-primary btn-sm" onclick="openAddTicket(currentDetailId)">+ New Ticket</button>
+        </div>
+        <div id="ticket-list"></div>
+      </div>
+
+      <!-- TAB: HISTORY -->
+      <div id="dtab-history" class="detail-tab-panel">
+        <div id="detail-history"></div>
+      </div>
+
+    </div><!-- /modal-body-scroll -->
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-detail')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── CONFIRM MODAL ── -->
+<div class="modal-overlay" id="modal-confirm">
+  <div class="modal" style="max-width:380px;">
+    <h3 id="confirm-title">Confirm Action</h3>
+    <p id="confirm-msg">Are you sure?</p>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-confirm')">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── TICKET MODAL ── -->
+<div class="modal-overlay" id="modal-ticket">
+  <div class="modal modal-lg">
+    <h3 id="ticket-modal-title">🎫 New Ticket</h3>
+    <p>Log a complaint, repair, maintenance or upgrade event</p>
+    <input type="hidden" id="ticket-device-id">
+    <input type="hidden" id="ticket-edit-id">
+    <div class="modal-body-scroll">
+      <div class="form-grid">
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>Ticket Title / Subject <span style="color:var(--red)">*</span></label>
+          <input type="text" id="tk-title" placeholder="e.g. Screen cracked — needs replacement">
+        </div>
+        <div class="form-group">
+          <label>Ticket Type</label>
+          <select id="tk-type">
+            <option value="complaint">🔴 Complaint</option>
+            <option value="repair">🟡 Repair</option>
+            <option value="maintenance">🔵 Maintenance</option>
+            <option value="upgrade">🟢 Upgrade</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="tk-status">
+            <option value="open">Open</option>
+            <option value="in-progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Date Logged</label>
+          <input type="date" id="tk-date">
+        </div>
+        <div class="form-group">
+          <label>Date Resolved</label>
+          <input type="date" id="tk-resolved">
+        </div>
+        <div class="form-group">
+          <label>Assigned Technician</label>
+          <input type="text" id="tk-tech" placeholder="Technician / vendor name">
+        </div>
+        <div class="form-group">
+          <label>Repair / Service Cost (₦)</label>
+          <input type="number" id="tk-cost" placeholder="0" min="0">
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>Description / Details</label>
+          <textarea id="tk-desc" rows="3" placeholder="Describe the issue, work done, parts replaced…" style="resize:vertical;"></textarea>
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>Resolution / Outcome</label>
+          <textarea id="tk-resolution" rows="2" placeholder="What was done to resolve the issue…" style="resize:vertical;"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-ticket')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTicket()">💾 Save Ticket</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── EDIT DEVICE MODAL ── -->
+<div class="modal-overlay" id="modal-edit-device">
+  <div class="modal modal-lg" style="width:760px;">
+    <h3>✏️ Edit Device</h3>
+    <p>Update device information</p>
+    <input type="hidden" id="edit-device-id">
+    <div class="modal-body-scroll" id="edit-device-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-edit-device')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditDevice()">💾 Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── IMPORT MODAL ── -->
+<div class="modal-overlay" id="modal-import">
+  <div class="modal" style="width:900px;max-width:96vw;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+      <h3 style="margin:0;">📂 Smart Import</h3>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="import-step-dot active" id="sdot-1">1</span>
+        <div style="width:28px;height:2px;background:var(--border);"></div>
+        <span class="import-step-dot" id="sdot-2">2</span>
+        <div style="width:28px;height:2px;background:var(--border);"></div>
+        <span class="import-step-dot" id="sdot-3">3</span>
+      </div>
+    </div>
+    <p id="import-step-label" style="margin-bottom:14px;color:var(--text3);font-size:12px;">Upload any Excel or CSV file — the app will intelligently map your columns</p>
+
+    <div class="modal-body-scroll">
+
+      <!-- ── STEP 1: UPLOAD ── -->
+      <div id="import-step-1">
+        <div class="import-drop-zone" id="import-drop-zone"
+             onclick="document.getElementById('import-file-input').click()"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="event.preventDefault();this.classList.remove('drag-over');handleImportFile(event.dataTransfer.files[0])">
+          <div class="dz-icon" id="dz-icon">📊</div>
+          <p id="dz-text">Click to browse or drag & drop your file here</p>
+          <small id="dz-sub">Accepts any .xlsx, .xls or .csv file — any column names, any format</small>
+        </div>
+        <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none"
+               onchange="handleImportFile(this.files[0])">
+
+        <!-- Download template -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text);">📥 Need a template?</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px;">Download the ITAssetTrack template with all supported columns pre-filled</div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="downloadImportTemplate()">⬇ Download Template</button>
+        </div>
+
+        <!-- Supported column hints -->
+        <div style="margin-top:14px;">
+          <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:10px;">Columns the importer understands (any naming)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;">
+            <span class="chip" style="color:var(--accent);">Asset Tag / Tag / New Tag</span>
+            <span class="chip">Device Name / Model / Device</span>
+            <span class="chip">Brand / Manufacturer</span>
+            <span class="chip">Serial / Serial Number / SN</span>
+            <span class="chip">Category / Type</span>
+            <span class="chip">Department / Dept</span>
+            <span class="chip">User / Assigned User / Staff</span>
+            <span class="chip">Processor / CPU</span>
+            <span class="chip">RAM / Memory (GB)</span>
+            <span class="chip">ROM / SSD (GB)</span>
+            <span class="chip">Disk / HDD (GB)</span>
+            <span class="chip">OS / Operating System</span>
+            <span class="chip">Date Purchased / Purchase Date</span>
+            <span class="chip">Date Received / Received</span>
+            <span class="chip">Date Assigned / Issued</span>
+            <span class="chip">Date Returned / Returned</span>
+            <span class="chip">Warranty / Warranty Expiry</span>
+            <span class="chip">Value / Purchase Value / Cost</span>
+            <span class="chip">Current Value</span>
+            <span class="chip">Supplier / Vendor</span>
+            <span class="chip">Invoice / PO Number</span>
+            <span class="chip">Condition</span>
+            <span class="chip">Status</span>
+            <span class="chip">Notes / Remarks</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── STEP 2: COLUMN MAPPER ── -->
+      <div id="import-step-2" style="display:none;">
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;" id="import-stats-bar">
+          <div class="import-stat total"><span class="is-num" id="imp-total">0</span> Rows found</div>
+          <div class="import-stat new"><span class="is-num" id="imp-new">0</span> Ready to import</div>
+          <div class="import-stat total"><span class="is-num" id="imp-update">0</span> Updates (merge)</div>
+          <div class="import-stat skip"><span class="is-num" id="imp-skip">0</span> Duplicates</div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;margin-bottom:10px;">
+          <div style="font-size:11px;color:var(--text3);">
+            Auto‑mapped fields: <span id="import-map-count" style="color:var(--accent);font-weight:700;">0</span>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2);cursor:pointer;">
+            <input type="checkbox" id="import-merge-toggle" style="accent-color:var(--accent);">
+            Merge duplicates (update existing devices)
+          </label>
+        </div>
+        <div id="import-map-summary" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;"></div>
+
+        <!-- Column mapping table -->
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);margin-bottom:8px;">
+          Column Mapping — <span style="color:var(--accent);font-weight:400;">Auto-detected. Adjust if needed.</span>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;">
+          <table style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border);">
+                <th style="padding:9px 14px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);text-align:left;width:30%;">Your Column</th>
+                <th style="padding:9px 14px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);text-align:left;width:5%;">→</th>
+                <th style="padding:9px 14px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);text-align:left;width:35%;">Maps to App Field</th>
+                <th style="padding:9px 14px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-family:var(--mono);text-align:left;">Sample Value</th>
+              </tr>
+            </thead>
+            <tbody id="col-map-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Unmapped columns -->
+        <div id="unmapped-wrap" style="display:none;margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">⚪ Columns not mapped (will be ignored):</div>
+          <div id="unmapped-chips" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+        </div>
+
+        <div id="import-warnings" style="display:none;margin-bottom:12px;background:var(--orange-dim);border:1px solid rgba(255,145,0,0.3);border-radius:8px;padding:12px;font-size:12px;color:var(--orange);"></div>
+
+        <button class="btn btn-primary" style="width:100%;" onclick="applyMappingAndPreview()">
+          ✅ Apply Mapping & Preview →
+        </button>
+      </div>
+
+      <!-- ── STEP 3: PREVIEW & CONFIRM ── -->
+      <div id="import-step-3" style="display:none;">
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+          <div class="import-stat total"><span class="is-num" id="imp-total-3">0</span> Rows</div>
+          <div class="import-stat new"><span class="is-num" id="imp-new-3">0</span> Will import</div>
+          <div class="import-stat total"><span class="is-num" id="imp-update-3">0</span> Will update</div>
+          <div class="import-stat skip"><span class="is-num" id="imp-skip-3">0</span> Skipped</div>
+        </div>
+
+        <!-- Full preview table -->
+        <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Preview — first 8 rows:</div>
+        <div class="import-preview-wrap">
+          <div class="table-wrap">
+            <table id="import-preview-table">
+              <thead><tr id="import-preview-head"></tr></thead>
+              <tbody id="import-preview-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Skipped rows -->
+        <div id="skipped-wrap" style="display:none;margin-top:12px;">
+          <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Skipped Rows (duplicates)</div>
+          <div id="skipped-list" style="max-height:100px;overflow-y:auto;font-size:11px;color:var(--text3);font-family:var(--mono);"></div>
+        </div>
+      </div>
+
+    </div><!-- /modal-body-scroll -->
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="import-back-btn" style="display:none;" onclick="importGoBack()">← Back</button>
+      <button class="btn btn-outline" onclick="resetImport();closeModal('modal-import')">Cancel</button>
+      <button class="btn btn-primary" id="import-confirm-btn" style="display:none;" onclick="confirmImport()">
+        ✅ Apply <span id="import-confirm-count">0</span> Changes
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── ADD / EDIT TASK MODAL ── -->
+<div class="modal-overlay" id="modal-task">
+  <div class="modal modal-lg">
+    <h3 id="task-modal-title">➕ New Task</h3>
+    <p id="task-modal-sub">Create a task and assign it to a team member</p>
+    <input type="hidden" id="task-edit-id">
+
+    <div class="modal-body-scroll">
+      <div class="form-grid">
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>Task Title <span style="color:var(--red)">*</span></label>
+          <input type="text" id="t-title" placeholder="e.g. Install antivirus on MSC-0042">
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>Description</label>
+          <textarea id="t-desc" rows="2" placeholder="Detailed description of what needs to be done…" style="resize:vertical;"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <select id="t-cat">
+            <option value="device">🖥️ Device / Hardware</option>
+            <option value="software">💿 Software / OS</option>
+            <option value="network">🌐 Network</option>
+            <option value="support">🎧 User Support</option>
+            <option value="admin">📋 Admin / Documentation</option>
+            <option value="other">📌 Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Due Date</label>
+          <input type="date" id="t-due">
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <div class="task-modal-priority">
+            <div class="priority-opt high selected" onclick="selectPriority('high')">🔴 High</div>
+            <div class="priority-opt medium" onclick="selectPriority('medium')">🟡 Medium</div>
+            <div class="priority-opt low" onclick="selectPriority('low')">🟢 Low</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Linked Asset Tag <span style="color:var(--text3);font-weight:400;">(optional)</span></label>
+          <input type="text" id="t-asset" placeholder="e.g. MSC-0042" list="t-asset-list">
+          <datalist id="t-asset-list"></datalist>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:6px;">
+        <label>Assign To <span style="color:var(--text3);font-weight:400;">(select one or more)</span></label>
+        <div class="assignee-list" id="t-assignee-list"></div>
+      </div>
+
+      <div class="form-group" style="margin-top:14px;">
+        <label>Notes / Checklist Items</label>
+        <textarea id="t-notes" rows="2" placeholder="Add any extra notes or sub-steps here…" style="resize:vertical;"></textarea>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-task')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTask()">💾 Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── TASK DETAIL MODAL ── -->
+<div class="modal-overlay" id="modal-task-detail">
+  <div class="modal modal-lg">
+    <div class="modal-body-scroll">
+      <div class="task-detail-header">
+        <div style="flex:1;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span class="task-detail-badge" id="td-status-badge">Pending</span>
+            <span class="task-tag" id="td-cat-tag"></span>
+            <span class="task-tag" id="td-priority-tag" style="margin-left:auto;"></span>
+          </div>
+          <h3 id="td-title" style="font-size:18px;margin-bottom:6px;"></h3>
+          <p id="td-desc" style="color:var(--text2);font-size:13px;margin-bottom:0;"></p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;">
+        <div class="detail-item"><label>Created By</label><span id="td-creator"></span></div>
+        <div class="detail-item"><label>Assigned To</label><span id="td-assignees"></span></div>
+        <div class="detail-item"><label>Due Date</label><span id="td-due"></span></div>
+        <div class="detail-item"><label>Linked Asset</label><span id="td-asset"></span></div>
+        <div class="detail-item"><label>Created</label><span id="td-created"></span></div>
+        <div class="detail-item"><label>Last Updated</label><span id="td-updated"></span></div>
+      </div>
+
+      <div id="td-notes-wrap" style="margin-bottom:16px;display:none;">
+        <div class="panel-title" style="margin-bottom:8px;">Notes</div>
+        <div id="td-notes" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;color:var(--text2);line-height:1.6;"></div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="panel-title" style="margin-bottom:10px;">Activity</div>
+      <div class="task-comments" id="td-comments"></div>
+      <div class="task-comment-input-wrap">
+        <input type="text" id="td-comment-input" placeholder="Add a comment or update…" onkeydown="if(event.key==='Enter')addTaskComment()">
+        <button class="btn btn-outline btn-sm" onclick="addTaskComment()">Post</button>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-task-detail')">Close</button>
+      <button class="btn btn-outline" id="td-edit-btn" onclick="editTaskFromDetail()">✏️ Edit</button>
+      <button class="btn btn-warning" id="td-start-btn" onclick="moveTask('progress')" style="display:none;">▶ Start</button>
+      <button class="btn btn-primary" id="td-complete-btn" onclick="moveTask('done')" style="display:none;">✅ Complete</button>
+      <button class="btn btn-outline" id="td-reopen-btn" onclick="moveTask('pending')" style="display:none;">↩ Reopen</button>
+    </div>
+  </div>
+</div>
+<!-- ── SETUP WIZARD ── -->
+<div class="setup-overlay" id="setup-overlay">
+  <div class="setup-box">
+    <div style="margin-bottom:24px;">
+      <div style="font-size:13px;font-weight:600;color:var(--accent);font-family:var(--mono);margin-bottom:10px;">GOOGLE SHEETS SYNC SETUP</div>
+      <div class="setup-progress">
+        <div class="setup-pip active" id="pip1"></div>
+        <div class="setup-pip" id="pip2"></div>
+        <div class="setup-pip" id="pip3"></div>
+        <div class="setup-pip" id="pip4"></div>
+      </div>
+    </div>
+
+    <!-- Step 1: Create Sheet -->
+    <div class="setup-step active" id="setup-step-1">
+      <div class="setup-step-num">Step 1 of 4</div>
+      <h3>Create a Google Sheet</h3>
+      <p>Your devices will be stored in a Google Sheet that all IT staff can access. It's free and requires no server.</p>
+      <ol style="font-size:13px;color:var(--text2);line-height:2.2;padding-left:20px;">
+        <li>Go to <a href="https://sheets.google.com" target="_blank" style="color:var(--accent);">sheets.google.com</a></li>
+        <li>Click <strong style="color:var(--text);">+ Blank</strong> to create a new spreadsheet</li>
+        <li>Name it <strong style="color:var(--text);">ITAssetTrack Data</strong></li>
+      </ol>
+      <div class="setup-nav">
+        <button class="btn btn-primary" onclick="setupNext()">Next →</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Apps Script -->
+    <div class="setup-step" id="setup-step-2">
+      <div class="setup-step-num">Step 2 of 4</div>
+      <h3>Add the Sync Script</h3>
+      <p>In your Google Sheet, open <strong style="color:var(--text);">Extensions → Apps Script</strong>, delete any existing code, paste this, then click <strong style="color:var(--text);">Save</strong> (💾).</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono);">Code.gs</span>
+        <button class="copy-btn" onclick="copyScriptCode()">📋 Copy Code</button>
+      </div>
+      <div class="setup-code">function doGet(e) { return handleRequest(e); }
+function doPost(e) { return handleRequest(e); }
+// ... (click Copy Code above for full script)</div>
+      <div class="setup-nav">
+        <button class="btn btn-outline" onclick="setupBack()">← Back</button>
+        <button class="btn btn-primary" onclick="setupNext()">I've pasted the code →</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Deploy -->
+    <div class="setup-step" id="setup-step-3">
+      <div class="setup-step-num">Step 3 of 4</div>
+      <h3>Deploy as Web App</h3>
+      <p>In Apps Script, click <strong style="color:var(--text);">Deploy → New deployment</strong>. Set these options exactly:</p>
+      <ol style="font-size:13px;color:var(--text2);line-height:2.4;padding-left:20px;">
+        <li>Type: <strong style="color:var(--text);">Web app</strong></li>
+        <li>Execute as: <strong style="color:var(--text);">Me</strong></li>
+        <li>Who has access: <strong style="color:var(--text);">Anyone</strong></li>
+        <li>Click <strong style="color:var(--text);">Deploy</strong> → authorise → copy the <strong style="color:var(--accent);">Web app URL</strong></li>
+      </ol>
+      <div class="form-group" style="margin-top:16px;">
+        <label>Paste your Web App URL here</label>
+        <input type="text" id="setup-script-url" placeholder="https://script.google.com/macros/s/…/exec" style="font-family:var(--mono);font-size:12px;">
+      </div>
+      <div class="setup-nav">
+        <button class="btn btn-outline" onclick="setupBack()">← Back</button>
+        <button class="btn btn-primary" onclick="setupNext()">Connect →</button>
+      </div>
+    </div>
+
+    <!-- Step 4: Done -->
+    <div class="setup-step" id="setup-step-4">
+      <div class="setup-step-num">Step 4 of 4</div>
+      <h3>🎉 You're Connected!</h3>
+      <p>ITAssetTrack will now sync all device data to your Google Sheet automatically every 30 seconds. All IT staff using this app with the same Sheet URL will see the same live data.</p>
+      <div style="background:var(--green-dim);border:1px solid rgba(0,230,118,0.25);border-radius:10px;padding:16px;font-size:13px;color:var(--text2);line-height:1.8;">
+        ✅ Devices sync automatically<br>
+        ✅ Manual push/pull available in Settings<br>
+        ✅ Local cache keeps app working offline<br>
+        ✅ Share the Sheet URL with your IT team
+      </div>
+      <div class="setup-nav">
+        <button class="btn btn-primary" onclick="setupNext()">Start Syncing →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+<!-- Cloudflare email decode script removed for local/offline use -->
+<script src="app.js"></script>
+
+</body>
+</html>
