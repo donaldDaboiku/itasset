@@ -18,7 +18,7 @@
  */
 
 // ── CONFIGURE THIS ──────────────────────────────────────
-const PRODUCT_ID = 'cusufrz'; // Your Gumroad product permalink
+const PRODUCT_ID = 'https://gitsystem.gumroad.com/l/cusufrz'; // Your Gumroad product permalink
 // ────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {

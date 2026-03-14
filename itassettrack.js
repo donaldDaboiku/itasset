@@ -24,6 +24,7 @@ const LICENSE_KEY='itassettrack_license';
 const TRIAL_KEY='itassettrack_trial_start';
 const SHEETS_CONFIG_KEY='itassettrack_sheets_config';
 
+
 // ── UTILS ────────────────────────────────────────────────
 function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function escAttr(s){return escHtml(s).replace(/'/g,'&#39;');}
@@ -681,8 +682,8 @@ function updateAccount(){
 // ─────────────────────────────────────────────────────────
 
 // ▼▼▼  CONFIGURE THESE  ▼▼▼
-const WORKER_URL = '';          // e.g. 'https://itassettrack-license.you.workers.dev'
-const GUMROAD_PERMALINK = 'cusufrz'; // your Gumroad product permalink
+const WORKER_URL = 'https://itasset.donalddaboiku.workers.dev';          // e.g. 'https://itassettrack-license.you.workers.dev'
+const GUMROAD_PERMALINK = 'https://gitsystem.gumroad.com/l/cusufrz'; // your Gumroad product permalink
 const OFFLINE_KEYS = [
   // Add your offline/hardcoded keys here, e.g.:
   // 'ITAT-DEMO-0001-ABCD',
