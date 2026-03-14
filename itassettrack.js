@@ -682,7 +682,7 @@ function updateAccount(){
 // ─────────────────────────────────────────────────────────
 
 // ▼▼▼  CONFIGURE THESE  ▼▼▼
-const WORKER_URL = 'https://itasset.donalddaboiku.workers.dev';          // e.g. 'https://itassettrack-license.you.workers.dev'
+const WORKER_URL = 'https://itasset.donalddaboiku.workers.dev';  // e.g. 'https://itassettrack-license.you.workers.dev'
 const GUMROAD_PERMALINK = 'https://gitsystem.gumroad.com/l/cusufrz'; // your Gumroad product permalink
 const OFFLINE_KEYS = [
   // Add your offline/hardcoded keys here, e.g.:
