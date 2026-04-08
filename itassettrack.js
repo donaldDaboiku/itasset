@@ -352,6 +352,79 @@ function registerServiceWorker() {
   );
 }
 
+function bytesToHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function generatePasswordSalt() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
+async function derivePasswordHash(password, salt) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: enc.encode(salt),
+      iterations: 120000,
+      hash: "SHA-256",
+    },
+    key,
+    256,
+  );
+  return bytesToHex(new Uint8Array(bits));
+}
+
+async function createPasswordRecord(password, salt = generatePasswordSalt()) {
+  return {
+    passwordSalt: salt,
+    passwordHash: await derivePasswordHash(password, salt),
+    passwordUpdatedAt: new Date().toISOString(),
+  };
+}
+
+function sanitizeUserRecord(user) {
+  const copy = { ...(user || {}) };
+  delete copy.password;
+  return copy;
+}
+
+function sanitizeUsersForSync(users) {
+  return (users || []).map((user) => sanitizeUserRecord(user));
+}
+
+async function verifyUserPassword(user, password) {
+  if (!user) return false;
+  if (user.passwordHash && user.passwordSalt) {
+    const hash = await derivePasswordHash(password, user.passwordSalt);
+    return hash === user.passwordHash;
+  }
+  if (typeof user.password === "string") return user.password === password;
+  return false;
+}
+
+async function migrateLegacyUsersIfNeeded() {
+  const users = getUsers();
+  let changed = false;
+  for (const user of users) {
+    if (typeof user.password === "string" && !user.passwordHash) {
+      Object.assign(user, await createPasswordRecord(user.password));
+      delete user.password;
+      changed = true;
+    }
+  }
+  if (changed) saveUsers(users, false);
+}
+
 // ── STORAGE ──────────────────────────────────────────────
 function loadData() {
   try {
@@ -2006,6 +2079,11 @@ function getBackendUrl() {
   if (!getCurrentPackage().sheetsSync) return null;
   return backendConfig && backendConfig.apiUrl ? backendConfig.apiUrl : null;
 }
+function getBackendSyncToken() {
+  return backendConfig && backendConfig.syncToken
+    ? backendConfig.syncToken
+    : "";
+}
 function getSheetsUrl() {
   return sheetsConfig && sheetsConfig.scriptUrl ? sheetsConfig.scriptUrl : null;
 }
@@ -2032,6 +2110,16 @@ function getSyncProvider() {
 function getSyncUrl() {
   const provider = getSyncProvider();
   return provider ? provider.url : null;
+}
+function getSyncHeaders(provider, includeContentType = false) {
+  const headers = {};
+  if (includeContentType) {
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
+  }
+  if (provider && provider.id === "backend" && getBackendSyncToken()) {
+    headers.Authorization = `Bearer ${getBackendSyncToken()}`;
+  }
+  return headers;
 }
 function updateSyncBar() {
   const dot = document.getElementById("sync-dot");
@@ -2078,6 +2166,7 @@ async function pullFromSheets() {
     const res = await fetch(`${url}?action=read&v=${Date.now()}`, {
       method: "GET",
       mode: "cors",
+      headers: getSyncHeaders(provider),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -2103,6 +2192,7 @@ async function pullFromSheets() {
 }
 async function pushToSheets() {
   if (!ensureFeatureAccess("sheetsSync")) return false;
+  await migrateLegacyUsersIfNeeded();
   const provider = getSyncProvider();
   const url = provider ? provider.url : null;
   if (!url) return false;
@@ -2111,7 +2201,7 @@ async function pushToSheets() {
     const res = await fetch(url, {
       method: "POST",
       mode: "cors",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: getSyncHeaders(provider, true),
       body: new URLSearchParams({
         action: "write",
         data: JSON.stringify({
@@ -2119,7 +2209,7 @@ async function pushToSheets() {
           history,
           tasks,
           settings,
-          users: getUsers(),
+          users: sanitizeUsersForSync(getUsers()),
         }),
       }).toString(),
     });
@@ -2183,6 +2273,8 @@ function disconnectBackend() {
 }
 function saveBackendSettings() {
   const raw = document.getElementById("backend-api-url")?.value.trim() || "";
+  const syncToken =
+    document.getElementById("backend-api-token")?.value.trim() || "";
   if (!raw) {
     toast("Enter a backend API URL", "error");
     return;
@@ -2191,14 +2283,30 @@ function saveBackendSettings() {
     toast("Use an absolute URL or a same-host path like /api/data", "error");
     return;
   }
-  saveBackendConfig({ apiUrl: raw, configuredAt: new Date().toISOString() });
+  if (!syncToken) {
+    toast("Enter the backend sync token before saving", "error");
+    return;
+  }
+  saveBackendConfig({
+    apiUrl: raw,
+    syncToken,
+    configuredAt: new Date().toISOString(),
+  });
   renderBackendSettings();
   updateSyncBar();
   toast("Backend database configured", "success");
 }
 function useBuiltinBackend() {
+  const syncToken =
+    document.getElementById("backend-api-token")?.value.trim() ||
+    getBackendSyncToken();
+  if (!syncToken) {
+    toast("Enter the backend sync token first", "error");
+    return;
+  }
   saveBackendConfig({
     apiUrl: "/api/data",
+    syncToken,
     configuredAt: new Date().toISOString(),
     mode: "builtin-sqlite",
   });
@@ -2216,10 +2324,10 @@ function renderBackendSettings() {
   }
   const url = getBackendUrl();
   if (url) {
-    el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Backend Database Connected</div><div style="font-size:11px;color:var(--text2);font-family:var(--mono);">${escHtml(url)}</div></div></div><div class="flex-row"><button class="btn btn-outline" onclick="doSyncNow()">📥 Pull Now</button><button class="btn btn-outline" onclick="pushToSheets().then(ok=>toast(ok?'Pushed!':'Push failed',ok?'success':'error'))">📤 Push Now</button><button class="btn btn-danger" onclick="disconnectBackend()">🔌 Disconnect</button></div><div class="plan-note">This mode uses the server API instead of Google Sheets. If this app is deployed together with the API, the recommended URL is <span class="mono">/api/data</span>.</div>`;
+    el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Backend Database Connected</div><div style="font-size:11px;color:var(--text2);font-family:var(--mono);">${escHtml(url)}</div></div></div><div class="flex-row"><button class="btn btn-outline" onclick="doSyncNow()">📥 Pull Now</button><button class="btn btn-outline" onclick="pushToSheets().then(ok=>toast(ok?'Pushed!':'Push failed',ok?'success':'error'))">📤 Push Now</button><button class="btn btn-danger" onclick="disconnectBackend()">🔌 Disconnect</button></div><div class="plan-note">This mode uses the server API instead of Google Sheets. The server should be configured with <span class="mono">ITASSET_SYNC_TOKEN</span>, and this app sends that token in the Authorization header.</div>`;
     return;
   }
-  el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">No Backend Database Yet</div><div style="font-size:11px;color:var(--text2);">Use the built-in SQLite API or point to another backend endpoint.</div></div></div><div class="form-grid" style="margin-bottom:12px;"><div class="form-group" style="grid-column:1/-1;"><label>Backend API URL</label><input type="text" id="backend-api-url" value="${escAttr(backendConfig?.apiUrl || "")}" placeholder="/api/data" style="font-family:var(--mono);font-size:12px;"></div></div><div class="flex-row"><button class="btn btn-primary" onclick="useBuiltinBackend()">⚡ Use Built-in DB</button><button class="btn btn-outline" onclick="saveBackendSettings()">💾 Save URL</button></div><div class="plan-note">Backend sync is preferred over Google Sheets when both are configured. This lets us move to a real database without changing the frontend again.</div>`;
+  el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">No Backend Database Yet</div><div style="font-size:11px;color:var(--text2);">Use the built-in SQLite API or point to another backend endpoint.</div></div></div><div class="form-grid" style="margin-bottom:12px;"><div class="form-group" style="grid-column:1/-1;"><label>Backend API URL</label><input type="text" id="backend-api-url" value="${escAttr(backendConfig?.apiUrl || "")}" placeholder="/api/data" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group" style="grid-column:1/-1;"><label>Sync Token</label><input type="password" id="backend-api-token" value="${escAttr(getBackendSyncToken())}" placeholder="Paste ITASSET_SYNC_TOKEN" style="font-family:var(--mono);font-size:12px;"></div></div><div class="flex-row"><button class="btn btn-primary" onclick="useBuiltinBackend()">⚡ Use Built-in DB</button><button class="btn btn-outline" onclick="saveBackendSettings()">💾 Save URL</button></div><div class="plan-note">Backend sync is preferred over Google Sheets when both are configured. Set <span class="mono">ITASSET_SYNC_TOKEN</span> on the server, then paste the same token here.</div>`;
 }
 function renderSheetsSettings() {
   const el = document.getElementById("sheets-settings-content");
@@ -2336,12 +2444,15 @@ const DEFAULT_USERS = [
   {
     id: "usr_admin",
     username: "admin",
-    password: "admin123",
     name: "Administrator",
     email: "",
     role: "admin",
     dept: "IT",
     status: "active",
+    passwordSalt: "d8f3b9e4c1a72f56b0e89123c4d5e6f7",
+    passwordHash:
+      "4160850519fc0b3a36c4ff3eb7edea8606ffbc9f8d625ff0d235189e5ade628f",
+    passwordUpdatedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     createdBy: "system",
     lastLogin: null,
@@ -2362,7 +2473,8 @@ function getUsers() {
   }
 }
 function saveUsers(u, syncRemote = true) {
-  localStorage.setItem("itassettrack_users", JSON.stringify(u));
+  const cleaned = (u || []).map((user) => sanitizeUserRecord(user));
+  localStorage.setItem("itassettrack_users", JSON.stringify(cleaned));
   if (syncRemote && getSyncUrl()) pushToSheets();
 }
 function getCurrentUser() {
@@ -2537,7 +2649,7 @@ function openEditUserModal(userId) {
   document.getElementById("modal-user").classList.add("open");
 }
 
-function saveUser() {
+async function saveUser() {
   const name = document.getElementById("u-name").value.trim();
   const username = document
     .getElementById("u-username")
@@ -2595,15 +2707,16 @@ function saveUser() {
       showMsg(getSeatLimitMessage(), true);
       return;
     }
+    const passwordRecord = await createPasswordRecord(pass);
     users.push({
       id: "usr_" + Date.now(),
       username,
-      password: pass,
       name,
       email,
       role,
       dept,
       status,
+      ...passwordRecord,
       createdAt: new Date().toISOString(),
       createdBy: getCurrentUser() ? getCurrentUser().username : "admin",
       lastLogin: null,
@@ -2640,7 +2753,7 @@ function saveUser() {
         showMsg("Passwords do not match.", true);
         return;
       }
-      users[idx].password = pass;
+      Object.assign(users[idx], await createPasswordRecord(pass));
     }
     users[idx] = { ...users[idx], name, username, email, dept, role, status };
     saveUsers(users);
@@ -2702,7 +2815,7 @@ function openResetPassModal(userId) {
   document.getElementById("modal-reset-pass").classList.add("open");
 }
 
-function doResetPassword() {
+async function doResetPassword() {
   const userId = document.getElementById("rp-user-id").value;
   const pass = document.getElementById("rp-pass").value;
   const pass2 = document.getElementById("rp-pass2").value;
@@ -2731,7 +2844,7 @@ function doResetPassword() {
     showMsg("User not found.", true);
     return;
   }
-  users[idx].password = pass;
+  Object.assign(users[idx], await createPasswordRecord(pass));
   saveUsers(users);
   closeModal("modal-reset-pass");
   toast("🔑 Password reset for " + users[idx].name, "success");
@@ -2752,7 +2865,7 @@ function switchLoginTab(btn, panelId) {
   document.getElementById("register-error").style.display = "none";
 }
 
-function doSignIn() {
+async function doSignIn() {
   const username = document.getElementById("signin-user").value.trim();
   const password = document.getElementById("signin-pass").value;
   const errEl = document.getElementById("signin-error");
@@ -2763,11 +2876,10 @@ function doSignIn() {
   }
   const users = getUsers();
   const user = users.find(
-    (u) =>
-      u.username.toLowerCase() === username.toLowerCase() &&
-      u.password === password,
+    (u) => u.username.toLowerCase() === username.toLowerCase(),
   );
-  if (!user) {
+  const validPassword = await verifyUserPassword(user, password);
+  if (!user || !validPassword) {
     errEl.textContent = "Incorrect username or password.";
     errEl.style.display = "block";
     document.getElementById("signin-pass").value = "";
@@ -2782,6 +2894,10 @@ function doSignIn() {
   const allUsers = getUsers();
   const idx = allUsers.findIndex((u) => u.username === user.username);
   if (idx !== -1) {
+    if (typeof allUsers[idx].password === "string" && !allUsers[idx].passwordHash) {
+      Object.assign(allUsers[idx], await createPasswordRecord(allUsers[idx].password));
+      delete allUsers[idx].password;
+    }
     allUsers[idx].lastLogin = new Date().toISOString();
     saveUsers(allUsers);
   }
@@ -2796,7 +2912,7 @@ function doSignIn() {
   showApp(user);
 }
 
-function doRegister() {
+async function doRegister() {
   const name = document.getElementById("reg-name").value.trim();
   const uname = document.getElementById("reg-user").value.trim();
   const pass = document.getElementById("reg-pass").value;
@@ -2841,15 +2957,16 @@ function doRegister() {
     errEl.style.display = "block";
     return;
   }
+  const passwordRecord = await createPasswordRecord(pass);
   const newUser = {
     id: "usr_" + Date.now(),
     username: uname.toLowerCase(),
-    password: pass,
     name,
     email: "",
     role: "staff",
     dept: "",
     status: "active",
+    ...passwordRecord,
     createdAt: new Date().toISOString(),
     createdBy: "self",
     lastLogin: new Date().toISOString(),
@@ -2925,7 +3042,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-function updateAccount() {
+async function updateAccount() {
   const newUser = document.getElementById("s-new-username").value.trim();
   const curPass = document.getElementById("s-cur-pass").value;
   const newPass = document.getElementById("s-new-pass").value;
@@ -2950,9 +3067,13 @@ function updateAccount() {
   const idx = users.findIndex(
     (u) => u.username.toLowerCase() === session.username.toLowerCase(),
   );
-  if (idx === -1 || users[idx].password !== curPass) {
+  if (idx === -1 || !(await verifyUserPassword(users[idx], curPass))) {
     showMsg("Current password is incorrect.", false);
     return;
+  }
+  if (typeof users[idx].password === "string" && !users[idx].passwordHash) {
+    Object.assign(users[idx], await createPasswordRecord(users[idx].password));
+    delete users[idx].password;
   }
   if (newUser) {
     if (
@@ -2975,7 +3096,7 @@ function updateAccount() {
       showMsg("New passwords do not match.", false);
       return;
     }
-    users[idx].password = newPass;
+    Object.assign(users[idx], await createPasswordRecord(newPass));
   }
   saveUsers(users);
   setCurrentUser({
@@ -4256,6 +4377,7 @@ function parseCSVImport(text) {
 
 // ── INIT ─────────────────────────────────────────────────
 function initApp() {
+  migrateLegacyUsersIfNeeded();
   loadData();
   loadSheetsConfig();
   loadSettingsForm();

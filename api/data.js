@@ -58,11 +58,17 @@ function ensureDb() {
   return db;
 }
 
-function json(res, status, payload) {
-  res.status(status).setHeader("Content-Type", "application/json");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+function applyCors(req, res) {
+  const origin = process.env.ITASSET_ALLOWED_ORIGIN || req.headers.origin || "null";
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+function json(req, res, status, payload) {
+  res.status(status).setHeader("Content-Type", "application/json");
+  applyCors(req, res);
   res.end(JSON.stringify(payload));
 }
 
@@ -99,12 +105,26 @@ function getRequestBody(req) {
   return req.body;
 }
 
+function getPresentedToken(req, body) {
+  const auth = String(req.headers.authorization || "");
+  if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, "").trim();
+  return req.headers["x-sync-token"] || "";
+}
+
+function sanitizeUserRow(user) {
+  const clean = { ...(user || {}) };
+  delete clean.password;
+  return clean;
+}
+
 function writeSnapshot(db, payload) {
   const now = new Date().toISOString();
   const devices = Array.isArray(payload.devices) ? payload.devices : [];
   const history = Array.isArray(payload.history) ? payload.history : [];
   const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
-  const users = Array.isArray(payload.users) ? payload.users : [];
+  const users = Array.isArray(payload.users)
+    ? payload.users.map((row) => sanitizeUserRow(row))
+    : [];
   const settings = payload.settings || {};
 
   const insertDevice = db.prepare(
@@ -169,7 +189,7 @@ function writeSnapshot(db, payload) {
         row.username || "",
         row.role || "",
         row.status || "",
-        JSON.stringify(row),
+        JSON.stringify(sanitizeUserRow(row)),
         row.lastLogin || row.updatedAt || now,
       );
     });
@@ -206,7 +226,7 @@ function readSnapshot(db) {
     devices: deviceRows.map((row) => parseMaybeJson(row.data, {})),
     history: historyRows.map((row) => parseMaybeJson(row.data, {})),
     tasks: taskRows.map((row) => parseMaybeJson(row.data, {})),
-    users: userRows.map((row) => parseMaybeJson(row.data, {})),
+    users: userRows.map((row) => sanitizeUserRow(parseMaybeJson(row.data, {}))),
     settings: settingsRow ? parseMaybeJson(settingsRow.value, {}) : {},
   };
 }
@@ -214,22 +234,32 @@ function readSnapshot(db) {
 module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    applyCors(req, res);
     res.end();
     return;
   }
 
   let db;
   try {
-    db = ensureDb();
     const body = getRequestBody(req);
+    const requiredToken = process.env.ITASSET_SYNC_TOKEN;
+    if (!requiredToken) {
+      json(req, res, 500, {
+        error: "Server not configured: missing ITASSET_SYNC_TOKEN",
+      });
+      return;
+    }
+    const presentedToken = getPresentedToken(req, body);
+    if (!presentedToken || presentedToken !== requiredToken) {
+      json(req, res, 401, { error: "Unauthorized" });
+      return;
+    }
+    db = ensureDb();
     const action =
       (req.query && req.query.action) || body.action || (req.method === "GET" ? "read" : "write");
 
     if (req.method === "GET" && action === "read") {
-      json(res, 200, readSnapshot(db));
+      json(req, res, 200, readSnapshot(db));
       return;
     }
 
@@ -237,13 +267,13 @@ module.exports = async function handler(req, res) {
       const incoming =
         typeof body.data === "string" ? parseMaybeJson(body.data, {}) : body.data || {};
       writeSnapshot(db, incoming);
-      json(res, 200, { ok: true, storage: "sqlite", path: DB_PATH });
+      json(req, res, 200, { ok: true, storage: "sqlite" });
       return;
     }
 
-    json(res, 405, { error: "Method not allowed" });
+    json(req, res, 405, { error: "Method not allowed" });
   } catch (error) {
-    json(res, 500, {
+    json(req, res, 500, {
       error: "Database sync failed",
       detail: error && error.message ? error.message : String(error),
     });
