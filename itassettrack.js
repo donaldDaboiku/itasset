@@ -3248,7 +3248,15 @@ async function updateAccount() {
 // ▼▼▼  CONFIGURE THESE  ▼▼▼
 const WORKER_URL = "https://itasset.donalddaboiku.workers.dev"; // e.g. 'https://itassettrack-license.you.workers.dev'
 const GUMROAD_PERMALINK = "https://gitsystem.gumroad.com/l/cusufrz"; // your Gumroad product permalink
+const DEMO_LICENSE_KEYS = {
+  starter: "DEMO-STR1-0001-0001",
+  pro: "DEMO-PRO1-0001-0001",
+  business: "DEMO-BIZ1-0001-0001",
+};
 const OFFLINE_KEYS = [
+  { key: DEMO_LICENSE_KEYS.starter, packageId: "starter" },
+  { key: DEMO_LICENSE_KEYS.pro, packageId: "pro" },
+  { key: DEMO_LICENSE_KEYS.business, packageId: "business" },
   // Add your offline/hardcoded keys here, e.g.:
   // 'ITAT-DEMO-0001-ABCD',
   // { key: 'ITAT-PRO-0001-ABCD', packageId: 'pro' },
@@ -3460,6 +3468,23 @@ function startTrial() {
       `Trial started — ${TRIAL_DAYS} days remaining.`;
   }
   showLoginFromLicense();
+}
+
+function useDemoPackage(packageId) {
+  const normalised = normalisePackageId(packageId);
+  const key = DEMO_LICENSE_KEYS[normalised];
+  if (!key) return;
+  selectLicensePackage(normalised);
+  const input = document.getElementById("license-key-input");
+  if (input) input.value = key;
+  activateLicense();
+}
+
+function fillDemoLogin() {
+  const userEl = document.getElementById("signin-user");
+  const passEl = document.getElementById("signin-pass");
+  if (userEl) userEl.value = "admin";
+  if (passEl) passEl.value = "admin123";
 }
 
 function checkLicense() {

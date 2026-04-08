@@ -34,6 +34,15 @@
         <div class="license-divider"></div>
         <button class="trial-btn" onclick="startTrial()">⏳ Start 7-Day Full Trial</button>
         <div class="trial-note" id="trial-note">Trial includes Business features, unlimited staff, task log, and sync.</div>
+        <div class="license-demo-block">
+          <div class="license-demo-title">Demo Access</div>
+          <div class="license-demo-buttons">
+            <button class="demo-btn" type="button" onclick="useDemoPackage('starter')">Starter Demo</button>
+            <button class="demo-btn" type="button" onclick="useDemoPackage('pro')">Pro Demo</button>
+            <button class="demo-btn" type="button" onclick="useDemoPackage('business')">Business Demo</button>
+          </div>
+          <div class="license-demo-note">Demo sign-in after activation: <strong>admin</strong> / <strong>admin123</strong></div>
+        </div>
       </div>
       <div class="license-summary-panel">
         <div class="license-panel-kicker">What Changes By Plan</div>
@@ -158,7 +167,10 @@
         <div class="login-form-group"><label>Username</label><input type="text" id="signin-user" placeholder="Enter your username" autocomplete="username"></div>
         <div class="login-form-group"><label>Password</label><input type="password" id="signin-pass" placeholder="Enter your password" autocomplete="current-password"></div>
         <button class="login-btn" onclick="doSignIn()">Sign In →</button>
-        <!-- <div style="margin-top:12px;font-size:11px;color:var(--text3);font-family:var(--mono);">Default: <strong style="color:var(--accent)">admin</strong> / <strong style="color:var(--accent)">admin123</strong></div> -->
+        <div class="login-demo-note">
+          Demo account: <strong>admin</strong> / <strong>admin123</strong>
+          <button class="login-demo-btn" type="button" onclick="fillDemoLogin()">Use Demo Login</button>
+        </div>
       </div>
       <div id="tab-register" class="login-panel">
         <div id="register-error" class="login-error"></div>
