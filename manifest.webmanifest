@@ -1,0 +1,28 @@
+{
+  "name": "ITAssetTrack",
+  "short_name": "ITAssetTrack",
+  "description": "Track IT assets, assignments, repairs, and team access from an installable PWA.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1320",
+  "theme_color": "#00d4ff",
+  "icons": [
+    {
+      "src": "icons/ITAssetTrack-appicon-cyan-256px.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/ITAssetTrack-appicon-cyan-512px.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/ITAssetTrack-appicon-cyan-512px.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

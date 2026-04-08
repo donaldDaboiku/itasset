@@ -28,6 +28,14 @@ const CORS_HEADERS = {
   'Content-Type': 'application/json',
 };
 
+function inferPackageId(productName = '') {
+  const text = String(productName || '').toLowerCase();
+  if (text.includes('unlimited') || text.includes('enterprise') || text.includes('premium')) return 'unlimited';
+  if (text.includes('team5') || text.includes('team 5') || text.includes('5 staff') || text.includes('five staff')) return 'team5';
+  if (text.includes('starter') || text.includes('one-time') || text.includes('basic')) return 'starter';
+  return 'unlimited';
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -84,6 +92,7 @@ export default {
         valid: true,
         purchaser: purchase.email || '',
         productName: purchase.product_name || '',
+        packageId: inferPackageId(purchase.product_name || ''),
         uses: gumroadData.uses || 0,
         // Don't expose the full purchase object — keep it minimal
       });

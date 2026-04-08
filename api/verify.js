@@ -8,6 +8,14 @@ function signToken(payload, secret) {
   return `${data}.${sig}`;
 }
 
+function inferPackageId(productName = '') {
+  const text = String(productName || '').toLowerCase();
+  if (text.includes('unlimited') || text.includes('enterprise') || text.includes('premium')) return 'unlimited';
+  if (text.includes('team5') || text.includes('team 5') || text.includes('5 staff') || text.includes('five staff')) return 'team5';
+  if (text.includes('starter') || text.includes('one-time') || text.includes('basic')) return 'starter';
+  return 'unlimited';
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -63,6 +71,8 @@ module.exports = async function handler(req, res) {
       return;
     }
 
+    const packageId = inferPackageId(purchase.product_name || product_permalink);
+
     const signingSecret = process.env.LICENSE_SIGNING_SECRET;
     if (!signingSecret) {
       res.status(500).json({ error: 'Server not configured: missing signing secret' });
@@ -74,10 +84,11 @@ module.exports = async function handler(req, res) {
       product: product_permalink,
       purchase_id: purchase.id || null,
       email: purchase.email || null,
+      package_id: packageId,
       ts: Date.now()
     }, signingSecret);
 
-    res.status(200).json({ valid: true, token });
+    res.status(200).json({ valid: true, token, productName: purchase.product_name || '', packageId });
   } catch (e) {
     res.status(500).json({ error: 'Verification failed' });
   }

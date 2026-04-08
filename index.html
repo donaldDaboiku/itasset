@@ -3,10 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#00d4ff">
 <title>ITAssetTrack</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="manifest" href="manifest.webmanifest">
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="itassettrack.css">
 </head>
 <body>
@@ -16,17 +18,34 @@
   <div class="license-box">
     <div class="license-logo">🖥️</div>
     <div class="license-badge">✦ ITAssetTrack v1.0</div>
-    <h2>Activate Your License</h2>
-    <p>Enter the license key from your Gumroad purchase confirmation email to unlock ITAssetTrack.</p>
+    <h2>Activate Your Package</h2>
+    <p>Starter is a one-time package with limited features. Subscription packages unlock task log, shared sync, and team seats.</p>
     <div id="license-error" class="license-error"></div>
     <div id="license-success" class="license-success"></div>
     <div class="license-input-wrap">
       <input type="text" id="license-key-input" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="24" autocomplete="off" spellcheck="false">
     </div>
-    <button class="license-btn" onclick="activateLicense()">🔓 Activate License</button>
+    <button class="license-btn" onclick="activateLicense()">🔓 Activate Package</button>
     <div class="license-divider"></div>
-    <button class="trial-btn" onclick="startTrial()">⏳ Start 7-Day Free Trial</button>
-    <div class="trial-note" id="trial-note">No license key required. Trial includes all features.</div>
+    <button class="trial-btn" onclick="startTrial()">⏳ Start 7-Day Full Trial</button>
+    <div class="trial-note" id="trial-note">Trial includes unlimited staff, task log, and sync features.</div>
+    <div class="license-package-grid">
+      <div class="license-package-card starter">
+        <div class="license-package-name">Starter</div>
+        <div class="license-package-meta">One-time purchase</div>
+        <div class="license-package-list">Core inventory, assignment, history log, single admin use</div>
+      </div>
+      <div class="license-package-card">
+        <div class="license-package-name">Subscription 5 Staff</div>
+        <div class="license-package-meta">Recurring</div>
+        <div class="license-package-list">Task log, Google Sheets sync, up to 5 staff seats</div>
+      </div>
+      <div class="license-package-card">
+        <div class="license-package-name">Subscription Unlimited</div>
+        <div class="license-package-meta">Recurring</div>
+        <div class="license-package-list">Task log, sync, server-ready setup, unlimited staff</div>
+      </div>
+    </div>
     <div class="license-footer">
       No license? <a href="https://gitsystem.gumroad.com/l/cusufrz" target="_blank">Purchase on Gumroad →</a><br>
       Support: <a href="mailto:gitsystemng@gmail.com">gitsystemng@gmail.com</a>
@@ -62,6 +81,7 @@
     <div class="login-right">
       <h2>Welcome back</h2>
       <p class="login-sub">Sign in to your ITAssetTrack account</p>
+      <div id="login-package-note" class="login-package-note"></div>
       <div class="login-tabs">
         <button class="login-tab active" onclick="switchLoginTab(this,'tab-signin')">Sign In</button>
         <button class="login-tab" onclick="switchLoginTab(this,'tab-register')">Register</button>
@@ -269,8 +289,13 @@
 
     <!-- ── SETTINGS ── -->
     <div id="page-settings" class="page">
-      <div class="page-hdr"><div><h2>Settings</h2><p>Configure system preferences and asset numbering</p></div></div>
+    <div class="page-hdr"><div><h2>Settings</h2><p>Configure system preferences and asset numbering</p></div></div>
       <div style="max-width:640px;">
+
+        <div class="settings-section">
+          <div class="settings-title">💳 Package & Access</div>
+          <div id="plan-settings-content"></div>
+        </div>
 
         <!-- Asset Tag Config -->
         <div class="settings-section">
@@ -295,7 +320,7 @@
         <div class="settings-section" id="team-mgmt-section" style="display:none;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
             <div><div class="settings-title" style="margin-bottom:2px;border:none;padding:0;">👥 Team Management</div><p style="color:var(--text2);font-size:12px;margin:0;">Create and manage staff login accounts</p></div>
-            <button class="btn btn-primary btn-sm" onclick="openAddUserModal()">+ Add User</button>
+            <button class="btn btn-primary btn-sm" id="team-add-user-btn" onclick="openAddUserModal()">+ Add User</button>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
             <span style="font-size:10px;font-family:var(--mono);padding:3px 10px;border-radius:20px;background:var(--red-dim);color:var(--red);">admin</span><span style="font-size:10px;color:var(--text3);align-self:center;">Full access + user management</span>
@@ -414,7 +439,7 @@
       <button class="detail-tab active" onclick="switchDetailTab(this,'dtab-info')">📋 Info</button>
       <button class="detail-tab" onclick="switchDetailTab(this,'dtab-specs')">⚙️ Specs</button>
       <button class="detail-tab" onclick="switchDetailTab(this,'dtab-finance')">💰 Finance</button>
-      <button class="detail-tab" onclick="switchDetailTab(this,'dtab-tickets')">🎫 Tickets <span id="ticket-count-badge" style="background:var(--red);color:#000;font-size:9px;font-family:var(--mono);padding:1px 5px;border-radius:8px;margin-left:4px;display:none;"></span></button>
+      <button class="detail-tab" onclick="switchDetailTab(this,'dtab-tickets')">📝 Task Log <span id="ticket-count-badge" style="background:var(--red);color:#000;font-size:9px;font-family:var(--mono);padding:1px 5px;border-radius:8px;margin-left:4px;display:none;"></span></button>
       <button class="detail-tab" onclick="switchDetailTab(this,'dtab-history')">📜 History</button>
     </div>
     <div class="modal-body-scroll">
@@ -435,10 +460,10 @@
           <div style="display:flex;align-items:center;gap:10px;"><div class="depr-bar-wrap" style="flex:1;"><div class="depr-bar" id="dd-depr-bar"></div></div><span id="dd-depr-pct" style="font-size:12px;font-family:var(--mono);color:var(--text2);"></span></div>
           <div style="font-size:11px;color:var(--text3);margin-top:4px;" id="dd-depr-note"></div>
         </div>
-        <div style="margin-top:16px;"><div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Repair / Ticket Cost Summary</div><div id="dd-cost-summary"></div></div>
+        <div style="margin-top:16px;"><div style="font-size:11px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Repair / Task Log Summary</div><div id="dd-cost-summary"></div></div>
       </div>
       <div id="dtab-tickets" class="detail-tab-panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="font-size:12px;color:var(--text2);">Log complaints, repairs, upgrades and maintenance</div><button class="btn btn-primary btn-sm" onclick="if(currentDetailId)openAddTicket(currentDetailId)">+ New Ticket</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="font-size:12px;color:var(--text2);">Log complaints, repairs, upgrades and maintenance tasks</div><button class="btn btn-primary btn-sm" onclick="if(currentDetailId)openAddTicket(currentDetailId)">+ New Task</button></div>
         <div id="ticket-list"></div>
       </div>
       <div id="dtab-history" class="detail-tab-panel"><div id="detail-history"></div></div>
@@ -462,7 +487,7 @@
 <!-- TICKET -->
 <div class="modal-overlay" id="modal-ticket">
   <div class="modal modal-lg">
-    <h3 id="ticket-modal-title">🎫 New Ticket</h3>
+    <h3 id="ticket-modal-title">📝 New Task Log Entry</h3>
     <p>Log a complaint, repair, maintenance or upgrade event</p>
     <input type="hidden" id="ticket-device-id">
     <div class="modal-body-scroll">
