@@ -10,10 +10,10 @@ function signToken(payload, secret) {
 
 function inferPackageId(productName = '') {
   const text = String(productName || '').toLowerCase();
-  if (text.includes('unlimited') || text.includes('enterprise') || text.includes('premium')) return 'unlimited';
-  if (text.includes('team5') || text.includes('team 5') || text.includes('5 staff') || text.includes('five staff')) return 'team5';
+  if (text.includes('business') || text.includes('unlimited') || text.includes('enterprise') || text.includes('premium')) return 'business';
+  if (text.includes('pro') || text.includes('team5') || text.includes('team 5') || text.includes('5 staff') || text.includes('five staff')) return 'pro';
   if (text.includes('starter') || text.includes('one-time') || text.includes('basic')) return 'starter';
-  return 'unlimited';
+  return 'starter';
 }
 
 module.exports = async function handler(req, res) {

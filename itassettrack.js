@@ -10,12 +10,15 @@ let confirmCallback = null;
 let lastConnectivity = null;
 let connectivityTimer = null;
 let sheetsConfig = null;
+let firebaseConfig = null;
 let backendConfig = null;
 let syncStatus = "local";
 let lastSyncTime = null;
 let syncInterval = null;
 let isSyncing = false;
 let lastSyncError = "";
+let firebaseClientPromise = null;
+let firebaseClientCacheKey = "";
 
 // import state
 let importRawRows = [],
@@ -32,6 +35,7 @@ const LICENSE_KEY = "itassettrack_license";
 const TRIAL_KEY = "itassettrack_trial_start";
 const LICENSE_PACKAGE_SELECTION_KEY = "itassettrack_selected_package";
 const SHEETS_CONFIG_KEY = "itassettrack_sheets_config";
+const FIREBASE_CONFIG_KEY = "itassettrack_firebase_config";
 const BACKEND_CONFIG_KEY = "itassettrack_backend_config";
 const DEFAULT_PACKAGE_ID = "starter";
 const PACKAGE_DEFS = {
@@ -289,7 +293,14 @@ function updateSelectedLicensePackageUI() {
   const note = document.getElementById("license-package-note");
   if (note) {
     const plan = getPackageDef(selected);
-    note.textContent = `Selected package: ${plan.name}. Use a matching license key to activate it.`;
+    const gumroadProduct = GUMROAD_PRODUCTS[selected] || GUMROAD_PRODUCTS.starter;
+    note.textContent = `Selected package: ${plan.name} (${gumroadProduct.priceLabel}). Use a matching license key to activate it.`;
+  }
+  const purchaseLink = document.getElementById("license-purchase-link");
+  if (purchaseLink) {
+    const gumroadProduct = GUMROAD_PRODUCTS[selected] || GUMROAD_PRODUCTS.starter;
+    purchaseLink.href = gumroadProduct.purchaseUrl;
+    purchaseLink.textContent = `Purchase ${gumroadProduct.name} on Gumroad →`;
   }
 }
 
@@ -594,6 +605,7 @@ function navigate(page) {
   if (page === "settings") {
     renderPlanSettings();
     renderBackendSettings();
+    renderFirebaseSettings();
     renderSheetsSettings();
     renderTeamUserList();
     applyRoleUI();
@@ -2168,6 +2180,11 @@ function loadSheetsConfig() {
     sheetsConfig = null;
   }
   try {
+    firebaseConfig = JSON.parse(localStorage.getItem(FIREBASE_CONFIG_KEY));
+  } catch (e) {
+    firebaseConfig = null;
+  }
+  try {
     backendConfig = JSON.parse(localStorage.getItem(BACKEND_CONFIG_KEY));
   } catch (e) {
     backendConfig = null;
@@ -2177,6 +2194,13 @@ function loadSheetsConfig() {
 function saveSheetsConfig(cfg) {
   sheetsConfig = cfg;
   localStorage.setItem(SHEETS_CONFIG_KEY, JSON.stringify(cfg));
+}
+function saveFirebaseConfig(cfg) {
+  firebaseConfig = cfg;
+  firebaseClientPromise = null;
+  firebaseClientCacheKey = "";
+  localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(cfg));
+  updateSyncBar();
 }
 function saveBackendConfig(cfg) {
   backendConfig = cfg;
@@ -2195,8 +2219,17 @@ function getBackendSyncToken() {
 function getSheetsUrl() {
   return sheetsConfig && sheetsConfig.scriptUrl ? sheetsConfig.scriptUrl : null;
 }
+function getFirebaseSyncConfig() {
+  return firebaseConfig && firebaseConfig.projectId ? firebaseConfig : null;
+}
 function getSheetsSyncSecret() {
   return sheetsConfig && sheetsConfig.syncSecret ? sheetsConfig.syncSecret : "";
+}
+function getFirebaseNamespace() {
+  return (
+    (firebaseConfig && firebaseConfig.namespace) ||
+    "main"
+  ).trim() || "main";
 }
 function getSyncProvider() {
   if (!getCurrentPackage().sheetsSync) return null;
@@ -2206,6 +2239,14 @@ function getSyncProvider() {
       id: "backend",
       name: "Backend Database",
       url: backendUrl,
+    };
+  }
+  const firebaseCfg = getFirebaseSyncConfig();
+  if (firebaseCfg) {
+    return {
+      id: "firebase",
+      name: "Firebase Firestore",
+      url: firebaseCfg.projectId,
     };
   }
   const sheetsUrl = getSheetsUrl();
@@ -2221,6 +2262,98 @@ function getSyncProvider() {
 function getSyncUrl() {
   const provider = getSyncProvider();
   return provider ? provider.url : null;
+}
+function getFirebaseCollectionName(namespace, segment) {
+  return `itassettrack_${namespace}_${segment}`;
+}
+function deriveSyncRowId(prefix, row, index) {
+  if (row && row.id) return String(row.id);
+  const base = [
+    prefix,
+    index,
+    row && (row.date || row.username || row.serial || row.staff),
+    row && (row.action || row.title || row.name || row.tag),
+  ]
+    .filter(Boolean)
+    .join("_");
+  return base || `${prefix}_${index}`;
+}
+function buildFirebasePayload(prefix, rows = []) {
+  return rows.map((row, index) => ({
+    id: deriveSyncRowId(prefix, row, index),
+    sortOrder: index,
+    updatedAt:
+      (row && (row.updatedAt || row.lastLogin || row.date || row.createdAt)) ||
+      "",
+    payload: row || {},
+  }));
+}
+async function ensureFirebaseClient() {
+  const cfg = getFirebaseSyncConfig();
+  if (!cfg) throw new Error("Firebase is not configured");
+  const cacheKey = JSON.stringify(cfg);
+  if (firebaseClientPromise && firebaseClientCacheKey === cacheKey) {
+    return firebaseClientPromise;
+  }
+  firebaseClientCacheKey = cacheKey;
+  firebaseClientPromise = (async () => {
+    const [{ initializeApp, getApps }, firestoreModule] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js"),
+    ]);
+    const appName = `itassettrack-sync-${cfg.projectId || "default"}`;
+    const existing = getApps().find((app) => app.name === appName);
+    const app = existing || initializeApp({
+      apiKey: cfg.apiKey,
+      authDomain: cfg.authDomain,
+      projectId: cfg.projectId,
+      appId: cfg.appId,
+      storageBucket: cfg.storageBucket || undefined,
+      messagingSenderId: cfg.messagingSenderId || undefined,
+    }, appName);
+    const db = firestoreModule.getFirestore(app);
+    return { db, firestore: firestoreModule };
+  })();
+  return firebaseClientPromise;
+}
+async function syncFirebaseCollection(db, firestore, collectionName, prefix, rows) {
+  const targetRows = buildFirebasePayload(prefix, rows);
+  const ref = firestore.collection(db, collectionName);
+  const existingSnap = await firestore.getDocs(ref);
+  const existingIds = new Set();
+  existingSnap.forEach((docSnap) => existingIds.add(docSnap.id));
+  const targetIds = new Set(targetRows.map((row) => row.id));
+  let batch = firestore.writeBatch(db);
+  let opCount = 0;
+  const commits = [];
+  const queueCommit = () => {
+    if (!opCount) return;
+    commits.push(batch.commit());
+    batch = firestore.writeBatch(db);
+    opCount = 0;
+  };
+  targetRows.forEach((row) => {
+    const docRef = firestore.doc(db, collectionName, row.id);
+    batch.set(docRef, row);
+    opCount++;
+    if (opCount >= 400) queueCommit();
+  });
+  existingIds.forEach((id) => {
+    if (targetIds.has(id)) return;
+    const docRef = firestore.doc(db, collectionName, id);
+    batch.delete(docRef);
+    opCount++;
+    if (opCount >= 400) queueCommit();
+  });
+  queueCommit();
+  await Promise.all(commits);
+}
+async function readFirebaseCollection(db, firestore, collectionName) {
+  const snap = await firestore.getDocs(firestore.collection(db, collectionName));
+  return snap.docs
+    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+    .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0))
+    .map((row) => row.payload || {});
 }
 function buildSheetsUrl(url, params = {}) {
   const fullUrl = new URL(url, location.href);
@@ -2289,6 +2422,42 @@ async function pullFromSheets() {
   isSyncing = true;
   setSyncStatus("syncing");
   try {
+    if (provider && provider.id === "firebase") {
+      const { db, firestore } = await ensureFirebaseClient();
+      const namespace = getFirebaseNamespace();
+      const settingsDoc = await firestore.getDoc(
+        firestore.doc(db, "itassettrack_sync_meta", namespace),
+      );
+      const settingsData = settingsDoc.exists() ? settingsDoc.data() : {};
+      devices = await readFirebaseCollection(
+        db,
+        firestore,
+        getFirebaseCollectionName(namespace, "devices"),
+      );
+      history = await readFirebaseCollection(
+        db,
+        firestore,
+        getFirebaseCollectionName(namespace, "history"),
+      );
+      tasks = await readFirebaseCollection(
+        db,
+        firestore,
+        getFirebaseCollectionName(namespace, "tasks"),
+      );
+      const syncedUsers = await readFirebaseCollection(
+        db,
+        firestore,
+        getFirebaseCollectionName(namespace, "users"),
+      );
+      settings = { ...settings, ...((settingsData && settingsData.settings) || {}) };
+      saveUsers(syncedUsers.length ? syncedUsers : [...DEFAULT_USERS], false);
+      saveDataLocal();
+      lastSyncTime = new Date().toISOString();
+      setSyncStatus("online");
+      isSyncing = false;
+      lastSyncError = "";
+      return true;
+    }
     const requestUrl =
       provider && provider.id === "sheets"
         ? buildSheetsUrl(url, { action: "read", ...getSheetsRequestParams() })
@@ -2332,6 +2501,53 @@ async function pushToSheets() {
   if (!url) return false;
   setSyncStatus("syncing");
   try {
+    if (provider && provider.id === "firebase") {
+      const { db, firestore } = await ensureFirebaseClient();
+      const namespace = getFirebaseNamespace();
+      await Promise.all([
+        syncFirebaseCollection(
+          db,
+          firestore,
+          getFirebaseCollectionName(namespace, "devices"),
+          "device",
+          devices,
+        ),
+        syncFirebaseCollection(
+          db,
+          firestore,
+          getFirebaseCollectionName(namespace, "history"),
+          "history",
+          history,
+        ),
+        syncFirebaseCollection(
+          db,
+          firestore,
+          getFirebaseCollectionName(namespace, "tasks"),
+          "task",
+          tasks,
+        ),
+        syncFirebaseCollection(
+          db,
+          firestore,
+          getFirebaseCollectionName(namespace, "users"),
+          "user",
+          sanitizeUsersForSync(getUsers()),
+        ),
+        firestore.setDoc(
+          firestore.doc(db, "itassettrack_sync_meta", namespace),
+          {
+            settings,
+            updatedAt: new Date().toISOString(),
+            namespace,
+          },
+          { merge: true },
+        ),
+      ]);
+      lastSyncTime = new Date().toISOString();
+      setSyncStatus("online");
+      lastSyncError = "";
+      return true;
+    }
     const body = new URLSearchParams({
       action: "write",
       data: JSON.stringify({
@@ -2403,6 +2619,17 @@ function disconnectSheets() {
   renderSheetsSettings();
   toast("Google Sheets disconnected", "warning");
 }
+function disconnectFirebase() {
+  if (syncInterval) clearInterval(syncInterval);
+  syncInterval = null;
+  localStorage.removeItem(FIREBASE_CONFIG_KEY);
+  firebaseConfig = null;
+  firebaseClientPromise = null;
+  firebaseClientCacheKey = "";
+  setSyncStatus("local");
+  renderFirebaseSettings();
+  toast("Firebase disconnected", "warning");
+}
 function disconnectBackend() {
   if (syncInterval) clearInterval(syncInterval);
   syncInterval = null;
@@ -2411,6 +2638,27 @@ function disconnectBackend() {
   setSyncStatus("local");
   renderBackendSettings();
   toast("Backend database disconnected", "warning");
+}
+function saveFirebaseSettings() {
+  const next = {
+    apiKey: document.getElementById("fb-api-key")?.value.trim() || "",
+    authDomain: document.getElementById("fb-auth-domain")?.value.trim() || "",
+    projectId: document.getElementById("fb-project-id")?.value.trim() || "",
+    appId: document.getElementById("fb-app-id")?.value.trim() || "",
+    storageBucket: document.getElementById("fb-storage-bucket")?.value.trim() || "",
+    messagingSenderId:
+      document.getElementById("fb-messaging-sender-id")?.value.trim() || "",
+    namespace: document.getElementById("fb-namespace")?.value.trim() || "main",
+    configuredAt: new Date().toISOString(),
+  };
+  if (!next.apiKey || !next.projectId || !next.appId) {
+    toast("Firebase API key, project ID, and app ID are required", "error");
+    return;
+  }
+  saveFirebaseConfig(next);
+  renderFirebaseSettings();
+  updateSyncBar();
+  toast("Firebase Firestore configured", "success");
 }
 function saveBackendSettings() {
   const raw = document.getElementById("backend-api-url")?.value.trim() || "";
@@ -2470,6 +2718,23 @@ function renderBackendSettings() {
   }
   el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">No Backend Database Yet</div><div style="font-size:11px;color:var(--text2);">Use the built-in SQLite API or point to another backend endpoint.</div></div></div><div class="form-grid" style="margin-bottom:12px;"><div class="form-group" style="grid-column:1/-1;"><label>Backend API URL</label><input type="text" id="backend-api-url" value="${escAttr(backendConfig?.apiUrl || "")}" placeholder="/api/data" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group" style="grid-column:1/-1;"><label>Sync Token</label><input type="password" id="backend-api-token" value="${escAttr(getBackendSyncToken())}" placeholder="Paste ITASSET_SYNC_TOKEN" style="font-family:var(--mono);font-size:12px;"></div></div><div class="flex-row"><button class="btn btn-primary" onclick="useBuiltinBackend()">⚡ Use Built-in DB</button><button class="btn btn-outline" onclick="saveBackendSettings()">💾 Save URL</button></div><div class="plan-note">Backend sync is preferred over Google Sheets when both are configured. Set <span class="mono">ITASSET_SYNC_TOKEN</span> on the server, then paste the same token here.</div>`;
 }
+function renderFirebaseSettings() {
+  const el = document.getElementById("firebase-settings-content");
+  if (!el) return;
+  if (!getCurrentPackage().sheetsSync) {
+    el.innerHTML =
+      '<div class="feature-upgrade-note">Firebase Firestore sync is available on Pro and Business.</div>';
+    return;
+  }
+  const cfg = getFirebaseSyncConfig();
+  if (cfg) {
+    const activeProvider = getSyncProvider();
+    const isActive = activeProvider && activeProvider.id === "firebase";
+    el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🔥</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Firebase Firestore Connected</div><div style="font-size:11px;color:var(--text2);font-family:var(--mono);">${escHtml(cfg.projectId)} · namespace ${escHtml(getFirebaseNamespace())}</div><div style="font-size:11px;color:var(--text3);margin-top:4px;">${isActive ? "Active sync provider" : "Configured as fallback provider"}</div></div></div><div class="flex-row"><button class="btn btn-outline" onclick="doSyncNow()">📥 Pull Now</button><button class="btn btn-outline" onclick="pushToSheets().then(ok=>toast(ok?'Pushed!':('Push failed: ' + (lastSyncError || 'check Firebase config/rules')),ok?'success':'error'))">📤 Push Now</button><button class="btn btn-outline" onclick="disconnectBackend();renderBackendSettings();renderFirebaseSettings();renderSheetsSettings();toast('Backend disabled. Firebase will now be preferred.', 'success')">⭐ Prefer Firebase</button><button class="btn btn-danger" onclick="disconnectFirebase()">🔌 Disconnect</button></div><div class="plan-note">Firestore works well for multi-user sync and is easier to scale than Google Apps Script. In Firebase console, create a Firestore database and add your web app config here. If you are using browser modules without Firebase Auth, ensure your Firestore rules allow this app to read/write the chosen collections.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🔥</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">No Firebase Project Yet</div><div style="font-size:11px;color:var(--text2);">Paste your Firebase web app config to use Firestore for shared sync.</div></div></div><div class="form-grid" style="margin-bottom:12px;"><div class="form-group"><label>API Key</label><input type="text" id="fb-api-key" value="${escAttr(firebaseConfig?.apiKey || "")}" placeholder="AIza..." style="font-family:var(--mono);font-size:12px;"></div><div class="form-group"><label>Auth Domain</label><input type="text" id="fb-auth-domain" value="${escAttr(firebaseConfig?.authDomain || "")}" placeholder="your-app.firebaseapp.com" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group"><label>Project ID</label><input type="text" id="fb-project-id" value="${escAttr(firebaseConfig?.projectId || "")}" placeholder="your-project-id" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group"><label>App ID</label><input type="text" id="fb-app-id" value="${escAttr(firebaseConfig?.appId || "")}" placeholder="1:123:web:abc" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group"><label>Storage Bucket</label><input type="text" id="fb-storage-bucket" value="${escAttr(firebaseConfig?.storageBucket || "")}" placeholder="your-project.firebasestorage.app" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group"><label>Messaging Sender ID</label><input type="text" id="fb-messaging-sender-id" value="${escAttr(firebaseConfig?.messagingSenderId || "")}" placeholder="1234567890" style="font-family:var(--mono);font-size:12px;"></div><div class="form-group" style="grid-column:1/-1;"><label>Namespace</label><input type="text" id="fb-namespace" value="${escAttr(firebaseConfig?.namespace || "main")}" placeholder="main" style="font-family:var(--mono);font-size:12px;"></div></div><div class="flex-row"><button class="btn btn-primary" onclick="saveFirebaseSettings()">💾 Save Firebase</button></div><div class="plan-note">Get this config from Firebase console: Project settings → Your apps → SDK setup and configuration. This app uses Firestore collections named like <span class="mono">itassettrack_main_devices</span>, <span class="mono">..._history</span>, <span class="mono">..._tasks</span>, <span class="mono">..._users</span>, plus <span class="mono">itassettrack_sync_meta</span>.</div>`;
+}
 function renderSheetsSettings() {
   const el = document.getElementById("sheets-settings-content");
   if (!el) return;
@@ -2477,8 +2742,11 @@ function renderSheetsSettings() {
     el.innerHTML = `<div class="feature-upgrade-note">Starter runs fully offline on one machine. Upgrade to Pro or Business to unlock shared Google Sheets sync and server-backed collaboration.${sheetsConfig && sheetsConfig.scriptUrl ? " Your saved sync URL will remain stored until you upgrade." : ""}</div>`;
     return;
   }
-  if (getBackendUrl()) {
-    el.innerHTML = `<div class="plan-note">Google Sheets is available as a fallback, but backend database sync is currently active and will be used first.</div><div class="flex-row"><button class="btn btn-outline" onclick="openSetupWizard()">⚙ Configure Sheets Fallback</button>${sheetsConfig?.scriptUrl ? `<button class="btn btn-danger" onclick="disconnectSheets()">🔌 Disconnect Sheets</button>` : ""}</div>`;
+  if (getBackendUrl() || getFirebaseSyncConfig()) {
+    const activeLabel = getBackendUrl()
+      ? "backend database sync"
+      : "Firebase Firestore sync";
+    el.innerHTML = `<div class="plan-note">Google Sheets is available as a fallback, but ${activeLabel} is currently active and will be used first.</div><div class="flex-row"><button class="btn btn-outline" onclick="openSetupWizard()">⚙ Configure Sheets Fallback</button>${sheetsConfig?.scriptUrl ? `<button class="btn btn-danger" onclick="disconnectSheets()">🔌 Disconnect Sheets</button>` : ""}</div>`;
     return;
   }
   const url = getSheetsUrl();
@@ -3452,7 +3720,7 @@ async function updateAccount() {
 //   3. Deploy it — you get a URL like:
 //      https://itassettrack-license.YOUR-NAME.workers.dev
 //   4. Replace WORKER_URL below with your actual Worker URL
-//   5. In the Worker, set GUMROAD_PRODUCT_ID = 'cusufrz'
+//   5. In the Worker, set PRODUCT_PERMALINK = 'itassettrack'
 //
 // OFFLINE FALLBACK KEYS:
 //   Add any keys you want to work offline to OFFLINE_KEYS below.
@@ -3464,7 +3732,27 @@ async function updateAccount() {
 
 // ▼▼▼  CONFIGURE THESE  ▼▼▼
 const WORKER_URL = "https://itasset.donalddaboiku.workers.dev"; // e.g. 'https://itassettrack-license.you.workers.dev'
-const GUMROAD_PERMALINK = "https://gitsystem.gumroad.com/l/cusufrz"; // your Gumroad product permalink
+const GUMROAD_PRODUCTS = {
+  starter: {
+    packageId: "starter",
+    name: "Starter",
+    priceLabel: "$49 / once",
+    purchaseUrl: "https://gitsystem.gumroad.com/l/itassettrack",
+  },
+  pro: {
+    packageId: "pro",
+    name: "Pro",
+    priceLabel: "$19 / mo",
+    purchaseUrl: "https://gitsystem.gumroad.com/l/itassettrack",
+  },
+  business: {
+    packageId: "business",
+    name: "Business",
+    priceLabel: "$59 / mo",
+    purchaseUrl: "https://gitsystem.gumroad.com/l/itassettrack",
+  },
+};
+const GUMROAD_PERMALINK = GUMROAD_PRODUCTS.starter.purchaseUrl;
 const DEMO_LICENSE_KEYS = {
   starter: "DEMO-STR1-0001-0001",
   pro: "DEMO-PRO1-0001-0001",
@@ -3486,7 +3774,7 @@ const OFFLINE_KEYS = [
 ──────────────────────────────────────────────────────────
 CLOUDFLARE WORKER CODE  (copy-paste into your Worker)
 ──────────────────────────────────────────────────────────
-const PRODUCT_ID = 'cusufrz'; // your Gumroad permalink
+const PRODUCT_PERMALINK = 'itassettrack'; // your Gumroad permalink
 
 export default {
   async fetch(request) {
@@ -3508,7 +3796,7 @@ export default {
     const gumroadRes = await fetch('https://api.gumroad.com/v2/licenses/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ product_id: PRODUCT_ID, license_key: key, increment_uses_count: 'false' }),
+      body: new URLSearchParams({ product_permalink: PRODUCT_PERMALINK, license_key: key, increment_uses_count: 'false' }),
     });
 
     const gumroadData = await gumroadRes.json();
@@ -3673,7 +3961,7 @@ function startTrial() {
     const left = getTrialDaysLeft();
     if (left <= 0) {
       document.getElementById("license-error").innerHTML =
-        `⏰ Your ${TRIAL_DAYS}-day trial has expired. <a href="https://gumroad.com/l/${GUMROAD_PERMALINK}" target="_blank" style="color:var(--accent);">Purchase a license →</a>`;
+        `⏰ Your ${TRIAL_DAYS}-day trial has expired. <a href="${escAttr((GUMROAD_PRODUCTS[getSelectedLicensePackageId()] || GUMROAD_PRODUCTS.starter).purchaseUrl)}" target="_blank" style="color:var(--accent);">Purchase a license →</a>`;
       document.getElementById("license-error").style.display = "block";
       return;
     }
@@ -4740,6 +5028,7 @@ function initApp() {
   loadSheetsConfig();
   loadSettingsForm();
   renderPlanSettings();
+  renderFirebaseSettings();
   refreshAuthPackageUI();
   updateDashboard();
   renderInventory();
@@ -4751,6 +5040,7 @@ function initApp() {
   renderReportSummary();
   updateFaultyBadge();
   renderBackendSettings();
+  renderFirebaseSettings();
   renderSheetsSettings();
   applyRoleUI();
   renderTeamUserList();

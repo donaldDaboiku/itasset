@@ -7,8 +7,8 @@
  *  1. Go to https://workers.cloudflare.com  and sign up (free)
  *  2. Click "Create a Worker"
  *  3. Delete the default code, paste this entire file
- *  4. Change PRODUCT_ID below to your Gumroad product permalink
- *     (the part after gumroad.com/l/ — yours is 'cusufrz')
+ *  4. Change PRODUCT_PERMALINK below to your Gumroad product permalink
+ *     (the part after gumroad.com/l/ — yours is 'itassettrack')
  *  5. Click "Deploy"
  *  6. Copy the Worker URL shown (e.g. https://itassettrack-license.you.workers.dev)
  *  7. Paste that URL into WORKER_URL in your ITAssetTrack HTML file
@@ -18,7 +18,7 @@
  */
 
 // ── CONFIGURE THIS ──────────────────────────────────────
-const PRODUCT_ID = 'https://gitsystem.gumroad.com/l/cusufrz'; // Your Gumroad product permalink
+const PRODUCT_PERMALINK = 'itassettrack'; // Your Gumroad product permalink slug
 // ────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {
@@ -30,10 +30,10 @@ const CORS_HEADERS = {
 
 function inferPackageId(productName = '') {
   const text = String(productName || '').toLowerCase();
-  if (text.includes('unlimited') || text.includes('enterprise') || text.includes('premium')) return 'unlimited';
-  if (text.includes('team5') || text.includes('team 5') || text.includes('5 staff') || text.includes('five staff')) return 'team5';
+  if (text.includes('business') || text.includes('unlimited') || text.includes('enterprise') || text.includes('premium')) return 'business';
+  if (text.includes('pro') || text.includes('team5') || text.includes('team 5') || text.includes('5 staff') || text.includes('five staff')) return 'pro';
   if (text.includes('starter') || text.includes('one-time') || text.includes('basic')) return 'starter';
-  return 'unlimited';
+  return 'starter';
 }
 
 function json(data, status = 200) {
@@ -75,7 +75,7 @@ export default {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          product_id: PRODUCT_ID,
+          product_permalink: PRODUCT_PERMALINK,
           license_key: licenseKey,
           increment_uses_count: 'false', // don't count verification calls as "uses"
         }),
