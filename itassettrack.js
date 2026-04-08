@@ -29,49 +29,70 @@ let importCurrentStep = 1;
 const TRIAL_DAYS = 7;
 const LICENSE_KEY = "itassettrack_license";
 const TRIAL_KEY = "itassettrack_trial_start";
+const LICENSE_PACKAGE_SELECTION_KEY = "itassettrack_selected_package";
 const SHEETS_CONFIG_KEY = "itassettrack_sheets_config";
 const BACKEND_CONFIG_KEY = "itassettrack_backend_config";
-const DEFAULT_PACKAGE_ID = "unlimited";
+const DEFAULT_PACKAGE_ID = "starter";
 const PACKAGE_DEFS = {
   starter: {
     id: "starter",
     name: "Starter",
     badge: "Starter",
     billing: "One-time purchase",
+    assetLimit: 50,
     seatLimit: 0,
     multiUser: false,
     taskLog: false,
     sheetsSync: false,
+    financeReports: false,
+    multiLocation: false,
+    customFields: false,
+    apiAccess: false,
   },
-  team5: {
-    id: "team5",
-    name: "Subscription 5 Staff",
-    badge: "5 Staff",
-    billing: "Subscription",
+  pro: {
+    id: "pro",
+    name: "Pro",
+    badge: "Pro",
+    billing: "Monthly or annual",
+    assetLimit: Infinity,
     seatLimit: 5,
     multiUser: true,
     taskLog: true,
     sheetsSync: true,
+    financeReports: true,
+    multiLocation: false,
+    customFields: false,
+    apiAccess: false,
   },
-  unlimited: {
-    id: "unlimited",
-    name: "Subscription Unlimited",
-    badge: "Unlimited",
-    billing: "Subscription",
+  business: {
+    id: "business",
+    name: "Business",
+    badge: "Business",
+    billing: "Unlimited staff",
+    assetLimit: Infinity,
     seatLimit: Infinity,
     multiUser: true,
     taskLog: true,
     sheetsSync: true,
+    financeReports: true,
+    multiLocation: true,
+    customFields: true,
+    apiAccess: true,
   },
   trial: {
     id: "trial",
     name: "Full Trial",
     badge: "Trial",
     billing: "Trial access",
+    assetLimit: Infinity,
     seatLimit: Infinity,
     multiUser: true,
     taskLog: true,
     sheetsSync: true,
+    financeReports: true,
+    multiLocation: true,
+    customFields: true,
+    apiAccess: true,
   },
 };
 
@@ -173,19 +194,21 @@ function normalisePackageId(value) {
   const key = String(value || "").trim().toLowerCase();
   if (!key) return "";
   if (
+    key.includes("business") ||
     key.includes("unlimited") ||
     key.includes("enterprise") ||
     key.includes("premium")
   )
-    return "unlimited";
+    return "business";
   if (
+    /\bpro\b/.test(key) ||
     key.includes("team5") ||
     key.includes("team-5") ||
     key.includes("5 staff") ||
     key.includes("5-seat") ||
     key.includes("five staff")
   )
-    return "team5";
+    return "pro";
   if (key.includes("starter") || key.includes("one-time") || key.includes("basic"))
     return "starter";
   if (key.includes("trial")) return "trial";
@@ -213,24 +236,31 @@ function getTrialDaysLeft() {
   return Math.max(0, TRIAL_DAYS - daysUsed);
 }
 
-function inferPackageId({ packageId, productName, key } = {}) {
+function inferPackageId({
+  packageId,
+  productName,
+  key,
+  fallbackPackageId = DEFAULT_PACKAGE_ID,
+} = {}) {
   const explicit = normalisePackageId(packageId);
   if (explicit) return explicit;
   const text = `${productName || ""} ${key || ""}`.toLowerCase();
   if (
+    text.includes("business") ||
     text.includes("unlimited") ||
     text.includes("enterprise") ||
     text.includes("premium")
   )
-    return "unlimited";
+    return "business";
   if (
+    /\bpro\b/.test(text) ||
     text.includes("team5") ||
     text.includes("team 5") ||
     text.includes("5 staff") ||
     text.includes("five staff") ||
     text.includes("5-seat")
   )
-    return "team5";
+    return "pro";
   if (
     text.includes("starter") ||
     text.includes("one-time") ||
@@ -238,7 +268,51 @@ function inferPackageId({ packageId, productName, key } = {}) {
     text.includes("single-user")
   )
     return "starter";
-  return DEFAULT_PACKAGE_ID;
+  return normalisePackageId(fallbackPackageId) || DEFAULT_PACKAGE_ID;
+}
+
+function getSelectedLicensePackageId() {
+  const stored = normalisePackageId(
+    localStorage.getItem(LICENSE_PACKAGE_SELECTION_KEY),
+  );
+  return stored && PACKAGE_DEFS[stored] ? stored : "starter";
+}
+
+function updateSelectedLicensePackageUI() {
+  const selected = getSelectedLicensePackageId();
+  document.querySelectorAll(".license-package-card").forEach((card) => {
+    const isSelected = normalisePackageId(card.dataset.package) === selected;
+    card.classList.toggle("selected", isSelected);
+    card.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+  const note = document.getElementById("license-package-note");
+  if (note) {
+    const plan = getPackageDef(selected);
+    note.textContent = `Selected package: ${plan.name}. Use a matching license key to activate it.`;
+  }
+}
+
+function selectLicensePackage(packageId) {
+  const normalised = normalisePackageId(packageId);
+  if (!normalised || !PACKAGE_DEFS[normalised]) return;
+  localStorage.setItem(LICENSE_PACKAGE_SELECTION_KEY, normalised);
+  updateSelectedLicensePackageUI();
+}
+
+function initLicensePackagePicker() {
+  document.querySelectorAll(".license-package-card").forEach((card) => {
+    if (card.dataset.bound === "true") return;
+    card.dataset.bound = "true";
+    const packageId = normalisePackageId(card.dataset.package);
+    card.addEventListener("click", () => selectLicensePackage(packageId));
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectLicensePackage(packageId);
+      }
+    });
+  });
+  updateSelectedLicensePackageUI();
 }
 
 function getCurrentPackage() {
@@ -250,6 +324,30 @@ function getCurrentPackage() {
 
 function getSeatLimitText(limit) {
   return limit === Infinity ? "Unlimited" : String(limit);
+}
+
+function getAssetLimitText(limit) {
+  return limit === Infinity ? "Unlimited" : String(limit);
+}
+
+function getAssetUsage() {
+  return devices.length;
+}
+
+function getAssetLimitMessage(additional = 1) {
+  const plan = getCurrentPackage();
+  if (plan.assetLimit === Infinity) return "";
+  const current = getAssetUsage();
+  const nextTotal = current + additional;
+  return `${plan.name} allows up to ${getAssetLimitText(plan.assetLimit)} tracked assets. You currently have ${current}, and this action would take you to ${nextTotal}. Upgrade to Pro or Business to continue.`;
+}
+
+function ensureAssetCapacity(additional = 1) {
+  const plan = getCurrentPackage();
+  if (plan.assetLimit === Infinity) return true;
+  if (getAssetUsage() + additional <= plan.assetLimit) return true;
+  toast(getAssetLimitMessage(additional), "warning");
+  return false;
 }
 
 function isSeatCountedUser(user) {
@@ -275,7 +373,7 @@ function getProjectedSeatUsage(users, draftUser, editId = "") {
 function getSeatLimitMessage() {
   const plan = getCurrentPackage();
   if (plan.id === "starter") {
-    return "Starter is limited to one admin login. Upgrade to a subscription for staff accounts.";
+    return "Starter is limited to one admin login. Upgrade to Pro or Business for staff accounts.";
   }
   return `${plan.name} allows up to ${getSeatLimitText(plan.seatLimit)} active staff account(s).`;
 }
@@ -284,9 +382,9 @@ function ensureFeatureAccess(featureKey) {
   const plan = getCurrentPackage();
   if (plan[featureKey]) return true;
   const messages = {
-    taskLog: "Task log is included in the subscription packages.",
-    sheetsSync: "Shared sync is included in the subscription packages.",
-    multiUser: "Additional staff accounts require a subscription package.",
+    taskLog: "Task log is included in the Pro and Business packages.",
+    sheetsSync: "Shared sync is included in the Pro and Business packages.",
+    multiUser: "Additional staff accounts require Pro or Business.",
   };
   toast(messages[featureKey] || "This feature is not available in your current package.", "warning");
   return false;
@@ -298,10 +396,17 @@ function renderPlanSettings() {
   const plan = getCurrentPackage();
   const license = checkLicense();
   const seatsUsed = getSeatUsage();
+  const assetsUsed = getAssetUsage();
   const seatValue =
-    plan.seatLimit === Infinity
+    !plan.multiUser
+      ? "Admin only"
+      : plan.seatLimit === Infinity
       ? `${seatsUsed} active`
       : `${seatsUsed}/${plan.seatLimit}`;
+  const assetValue =
+    plan.assetLimit === Infinity
+      ? `${assetsUsed} tracked`
+      : `${assetsUsed}/${plan.assetLimit}`;
   const statusText =
     license.type === "trial"
       ? `${license.daysLeft} day${license.daysLeft !== 1 ? "s" : ""} left`
@@ -309,7 +414,7 @@ function renderPlanSettings() {
   const featureChip = (enabled, label) =>
     `<span class="plan-feature ${enabled ? "on" : "off"}">${enabled ? "Included" : "Upgrade"} · ${label}</span>`;
   el.innerHTML =
-    `<div class="plan-card"><div class="plan-card-head"><div><div class="plan-name">${escHtml(plan.name)}</div><div class="plan-meta">${escHtml(statusText)}</div></div><span class="plan-badge ${escAttr(plan.id)}">${escHtml(plan.badge)}</span></div><div class="plan-grid"><div class="plan-mini-stat"><div class="plan-mini-label">Task Log</div><div class="plan-mini-value">${plan.taskLog ? "Enabled" : "Locked"}</div></div><div class="plan-mini-stat"><div class="plan-mini-label">Staff Seats</div><div class="plan-mini-value">${escHtml(seatValue)}</div></div><div class="plan-mini-stat"><div class="plan-mini-label">Shared Sync</div><div class="plan-mini-value">${plan.sheetsSync ? "Enabled" : "Locked"}</div></div></div><div class="plan-feature-list">${featureChip(plan.taskLog, "Task log")}${featureChip(plan.multiUser, "Multi-user")}${featureChip(plan.sheetsSync, "Google Sheets sync")}</div><div class="plan-note">Yes, this can use a server and still be a PWA. Keep the app hosted over HTTPS, then use your API or Worker for license verification and shared sync while the app remains installable and offline-capable.</div></div>`;
+    `<div class="plan-card"><div class="plan-card-head"><div><div class="plan-name">${escHtml(plan.name)}</div><div class="plan-meta">${escHtml(statusText)}</div></div><span class="plan-badge ${escAttr(plan.id)}">${escHtml(plan.badge)}</span></div><div class="plan-grid"><div class="plan-mini-stat"><div class="plan-mini-label">Assets</div><div class="plan-mini-value">${escHtml(assetValue)}</div></div><div class="plan-mini-stat"><div class="plan-mini-label">Task Log</div><div class="plan-mini-value">${plan.taskLog ? "Enabled" : "Locked"}</div></div><div class="plan-mini-stat"><div class="plan-mini-label">Staff Seats</div><div class="plan-mini-value">${escHtml(seatValue)}</div></div><div class="plan-mini-stat"><div class="plan-mini-label">Shared Sync</div><div class="plan-mini-value">${plan.sheetsSync ? "Enabled" : "Locked"}</div></div></div><div class="plan-feature-list">${featureChip(true, "Asset tracking")}${featureChip(plan.taskLog, "Task log / help desk")}${featureChip(plan.multiUser, "Staff accounts")}${featureChip(plan.sheetsSync, "Shared sync")}${featureChip(plan.financeReports, "Finance reports")}${featureChip(plan.multiLocation, "Multi-location")}${featureChip(plan.customFields, "Custom fields")}${featureChip(plan.apiAccess, "API access")}</div><div class="plan-note">Yes, this can use a server and still be a PWA. Keep the app hosted over HTTPS, then use your API or Worker for license verification and shared sync while the app remains installable and offline-capable.</div></div>`;
 }
 
 function refreshAuthPackageUI() {
@@ -534,6 +639,7 @@ function bumpCounter() {
 
 // ── ADD DEVICE ────────────────────────────────────────────
 function openAddModal() {
+  if (!ensureAssetCapacity(1)) return;
   document.getElementById("f-tag").value = nextTag();
   [
     "f-name",
@@ -576,6 +682,7 @@ function openAddModal() {
 }
 
 function addDevice() {
+  if (!ensureAssetCapacity(1)) return;
   const name = document.getElementById("f-name").value.trim();
   const serial = document.getElementById("f-serial").value.trim();
   const tag = document.getElementById("f-tag").value;
@@ -1131,7 +1238,7 @@ function renderTicketList(d) {
   if (!getCurrentPackage().taskLog) {
     badge.style.display = "none";
     el.innerHTML =
-      '<div class="feature-upgrade-note">Task log is part of the subscription packages. Upgrade to log complaints, repairs, maintenance, and upgrades for each device.</div>';
+      '<div class="feature-upgrade-note">Task log is part of the Pro and Business packages. Upgrade to log complaints, repairs, maintenance, and upgrades for each device.</div>';
     return;
   }
   const tickets = d.tickets || [];
@@ -1603,7 +1710,7 @@ function renderTaskLogPage() {
   if (!getCurrentPackage().taskLog) {
     noteEl.style.display = "block";
     noteEl.textContent =
-      "Daily activity task logging and weekly, monthly, quarterly, and yearly reporting are available on the subscription packages.";
+      "Daily activity task logging and weekly, monthly, quarterly, and yearly reporting are available on Pro and Business.";
     kpiEl.style.display = "none";
     renderTaskTable([]);
     renderTaskPeriodSummary([]);
@@ -1746,7 +1853,7 @@ function renderTaskReportSummary() {
   if (!el) return;
   if (!getCurrentPackage().taskLog) {
     el.innerHTML =
-      '<div class="feature-upgrade-note">Task activity reporting is included in the subscription packages.</div>';
+      '<div class="feature-upgrade-note">Task activity reporting is included in the Pro and Business packages.</div>';
     return;
   }
   const summaries = [
@@ -2127,7 +2234,7 @@ function updateSyncBar() {
   const timeEl = document.getElementById("sync-time");
   if (!getCurrentPackage().sheetsSync) {
     dot.className = "sync-dot local";
-    txt.textContent = "Google Sheets sync is available on subscription packages";
+    txt.textContent = "Shared sync is available on Pro and Business";
     timeEl.textContent = "";
     return;
   }
@@ -2319,7 +2426,7 @@ function renderBackendSettings() {
   if (!el) return;
   if (!getCurrentPackage().sheetsSync) {
     el.innerHTML =
-      '<div class="feature-upgrade-note">Shared backend database sync is available on the subscription packages.</div>';
+      '<div class="feature-upgrade-note">Shared backend database sync is available on Pro and Business.</div>';
     return;
   }
   const url = getBackendUrl();
@@ -2333,7 +2440,7 @@ function renderSheetsSettings() {
   const el = document.getElementById("sheets-settings-content");
   if (!el) return;
   if (!getCurrentPackage().sheetsSync) {
-    el.innerHTML = `<div class="feature-upgrade-note">Starter runs fully offline on one machine. Upgrade to a subscription package to unlock shared Google Sheets sync and server-backed collaboration.${sheetsConfig && sheetsConfig.scriptUrl ? " Your saved sync URL will remain stored until you upgrade." : ""}</div>`;
+    el.innerHTML = `<div class="feature-upgrade-note">Starter runs fully offline on one machine. Upgrade to Pro or Business to unlock shared Google Sheets sync and server-backed collaboration.${sheetsConfig && sheetsConfig.scriptUrl ? " Your saved sync URL will remain stored until you upgrade." : ""}</div>`;
     return;
   }
   if (getBackendUrl()) {
@@ -2544,7 +2651,7 @@ function renderTeamUserList() {
   const cu = getCurrentUser();
   if (!plan.multiUser) {
     el.innerHTML =
-      '<div class="feature-upgrade-note">Starter is limited to the main admin account. Upgrade to Subscription 5 Staff or Subscription Unlimited to add team members and separate staff logins.</div><div style="margin-top:8px;font-size:11px;color:var(--text3);">Seats: ' +
+      '<div class="feature-upgrade-note">Starter is limited to the main admin account. Upgrade to Pro or Business to add team members and separate staff logins.</div><div style="margin-top:8px;font-size:11px;color:var(--text3);">Seats: ' +
       getSeatUsage(users) +
       " / 0</div>";
     return;
@@ -3144,7 +3251,7 @@ const GUMROAD_PERMALINK = "https://gitsystem.gumroad.com/l/cusufrz"; // your Gum
 const OFFLINE_KEYS = [
   // Add your offline/hardcoded keys here, e.g.:
   // 'ITAT-DEMO-0001-ABCD',
-  // { key: 'ITAT-TEAM5-0001-ABCD', packageId: 'team5' },
+  // { key: 'ITAT-PRO-0001-ABCD', packageId: 'pro' },
   // { key: 'ITAT-STARTER-0001-ABCD', packageId: 'starter' },
   // 'ITAT-XXXX-YYYY-ZZZZ',
 ];
@@ -3221,7 +3328,7 @@ function checkOfflineKey(key) {
     const rawKey = typeof item === "string" ? item : item && item.key;
     if (rawKey && normalise(rawKey) === normKey) {
       return typeof item === "string"
-        ? { key: rawKey, packageId: DEFAULT_PACKAGE_ID }
+        ? { key: rawKey }
         : item;
     }
   }
@@ -3249,6 +3356,7 @@ async function activateLicense() {
     .getElementById("license-key-input")
     .value.trim()
     .toUpperCase();
+  const selectedPackageId = getSelectedLicensePackageId();
   const errEl = document.getElementById("license-error");
   const okEl = document.getElementById("license-success");
   errEl.style.display = "none";
@@ -3266,7 +3374,11 @@ async function activateLicense() {
   // ── Step 1: Offline fallback keys (instant, no network) ──
   const offlineMatch = checkOfflineKey(key);
   if (offlineMatch) {
-    const packageId = inferPackageId({ packageId: offlineMatch.packageId, key });
+    const packageId = inferPackageId({
+      packageId: offlineMatch.packageId,
+      key,
+      fallbackPackageId: selectedPackageId,
+    });
     storeLicense(key, "offline", { packageId });
     okEl.innerHTML = `✅ ${escHtml(getPackageDef(packageId).name)} activated! (offline mode)`;
     okEl.style.display = "block";
@@ -3288,6 +3400,7 @@ async function activateLicense() {
           packageId: data.packageId,
           productName: data.productName,
           key,
+          fallbackPackageId: selectedPackageId,
         });
         storeLicense(key, "gumroad", {
           purchaser: data.purchaser || "",
@@ -3323,7 +3436,7 @@ async function activateLicense() {
   } else {
     // Worker configured but network failed
     errEl.innerHTML = `❌ Could not reach the license server — check your internet connection.<br>
-      <span style="font-size:11px;opacity:.8;">If you're offline, ask your admin to add your key to the offline list.</span>`;
+      <span style="font-size:11px;opacity:.8;">Selected package: ${escHtml(getPackageDef(selectedPackageId).name)}. If you're offline, ask your admin to add your key to the offline list.</span>`;
     errEl.style.display = "block";
     okEl.style.display = "none";
   }
@@ -4277,6 +4390,9 @@ function confirmImport() {
     toast("Nothing to import", "error");
     return;
   }
+  if (importParsedRows.length && !ensureAssetCapacity(importParsedRows.length)) {
+    return;
+  }
   const importedCount = importParsedRows.length;
   const updatedCount = importUpdates.length;
   const skippedCount = importSkipped.length;
@@ -4413,6 +4529,7 @@ function initApp() {
 // ── BOOT ─────────────────────────────────────────────────
 (function boot() {
   registerServiceWorker();
+  initLicensePackagePicker();
   const licStatus = checkLicense();
   if (!licStatus.valid) {
     document.getElementById("license-screen").classList.add("visible");

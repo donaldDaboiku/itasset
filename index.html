@@ -16,34 +16,101 @@
 <!-- ═══════════════════════════════ LICENSE GATE ═══════════════════════════════ -->
 <div id="license-screen">
   <div class="license-box">
-    <div class="license-logo">🖥️</div>
-    <div class="license-badge">✦ ITAssetTrack v1.0</div>
-    <h2>Activate Your Package</h2>
-    <p>Starter is a one-time package with limited features. Subscription packages unlock task log, shared sync, and team seats.</p>
-    <div id="license-error" class="license-error"></div>
-    <div id="license-success" class="license-success"></div>
-    <div class="license-input-wrap">
-      <input type="text" id="license-key-input" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="24" autocomplete="off" spellcheck="false">
+    <div class="license-header">
+      <div class="license-logo">🖥️</div>
+      <div class="license-badge">✦ ITAssetTrack v1.0</div>
+      <h2>Choose Your Package</h2>
+      <p>Pick the right tier for your team, then activate it with the matching license key. The app still works as a PWA, and Pro or Business can connect to Google Sheets or your backend server.</p>
     </div>
-    <button class="license-btn" onclick="activateLicense()">🔓 Activate Package</button>
-    <div class="license-divider"></div>
-    <button class="trial-btn" onclick="startTrial()">⏳ Start 7-Day Full Trial</button>
-    <div class="trial-note" id="trial-note">Trial includes unlimited staff, task log, and sync features.</div>
-    <div class="license-package-grid">
-      <div class="license-package-card starter">
+    <div class="license-activation-shell">
+      <div class="license-activation-panel">
+        <div class="license-panel-kicker">Activation</div>
+        <div id="license-error" class="license-error"></div>
+        <div id="license-success" class="license-success"></div>
+        <div class="license-input-wrap">
+          <input type="text" id="license-key-input" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="24" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="license-btn" onclick="activateLicense()">🔓 Activate Package</button>
+        <div class="license-divider"></div>
+        <button class="trial-btn" onclick="startTrial()">⏳ Start 7-Day Full Trial</button>
+        <div class="trial-note" id="trial-note">Trial includes Business features, unlimited staff, task log, and sync.</div>
+      </div>
+      <div class="license-summary-panel">
+        <div class="license-panel-kicker">What Changes By Plan</div>
+        <h3>Starter for solo use. Pro for active teams. Business for scale.</h3>
+        <p>Starter keeps things simple with offline-first inventory control. Pro adds staff accounts, task logging, finance views, and shared sync. Business opens the door for branch-ready setup, custom fields, and API-backed deployment.</p>
+        <div class="license-summary-chips">
+          <span class="license-summary-chip">PWA installable</span>
+          <span class="license-summary-chip">Offline-ready</span>
+          <span class="license-summary-chip">Role-based access</span>
+          <span class="license-summary-chip">Server-compatible</span>
+        </div>
+        <div class="license-package-note" id="license-package-note">Selected package: Starter. Use a matching license key to activate it.</div>
+      </div>
+    </div>
+    <div class="license-package-grid" id="license-package-grid">
+      <div class="license-package-card starter selected" data-package="starter" role="button" tabindex="0" aria-pressed="true">
+        <div class="license-package-pill">One-time purchase</div>
         <div class="license-package-name">Starter</div>
-        <div class="license-package-meta">One-time purchase</div>
-        <div class="license-package-list">Core inventory, assignment, history log, single admin use</div>
+        <div class="license-package-price">$49 <span>/ once</span></div>
+        <div class="license-package-meta">No subscription · no expiry</div>
+        <div class="license-package-section">Asset Tracking</div>
+        <div class="license-package-list">
+          <div class="license-feature-row">Add and manage assets</div>
+          <div class="license-feature-row">Core asset details and history</div>
+          <div class="license-feature-row">Up to 50 tracked assets</div>
+          <div class="license-feature-row muted">Software inventory</div>
+        </div>
+        <div class="license-package-section">General</div>
+        <div class="license-package-list">
+          <div class="license-feature-row">Solo admin only</div>
+          <div class="license-feature-row">CSV export</div>
+          <div class="license-feature-row">PWA and offline use</div>
+          <div class="license-feature-row muted">Staff accounts</div>
+        </div>
+        <div class="license-package-cta">Select Starter ↗</div>
       </div>
-      <div class="license-package-card">
-        <div class="license-package-name">Subscription 5 Staff</div>
-        <div class="license-package-meta">Recurring</div>
-        <div class="license-package-list">Task log, Google Sheets sync, up to 5 staff seats</div>
+      <div class="license-package-card pro" data-package="pro" role="button" tabindex="0" aria-pressed="false">
+        <div class="license-package-pill featured">Most popular</div>
+        <div class="license-package-name">Pro</div>
+        <div class="license-package-price">$19 <span>/ mo</span></div>
+        <div class="license-package-meta">Up to 5 staff · monthly or annual</div>
+        <div class="license-package-section">Asset Tracking</div>
+        <div class="license-package-list">
+          <div class="license-feature-row">Unlimited asset inventory</div>
+          <div class="license-feature-row">Asset assignment to staff</div>
+          <div class="license-feature-row">Asset history and audit log</div>
+          <div class="license-feature-row">QR and barcode scanning</div>
+        </div>
+        <div class="license-package-section">Operations</div>
+        <div class="license-package-list">
+          <div class="license-feature-row">Task creation and tracking</div>
+          <div class="license-feature-row">Finance and value reports</div>
+          <div class="license-feature-row">Up to 5 staff accounts</div>
+          <div class="license-feature-row">CSV and PDF export</div>
+        </div>
+        <div class="license-package-cta">Select Pro ↗</div>
       </div>
-      <div class="license-package-card">
-        <div class="license-package-name">Subscription Unlimited</div>
-        <div class="license-package-meta">Recurring</div>
-        <div class="license-package-list">Task log, sync, server-ready setup, unlimited staff</div>
+      <div class="license-package-card business" data-package="business" role="button" tabindex="0" aria-pressed="false">
+        <div class="license-package-pill business">Business</div>
+        <div class="license-package-name">Business</div>
+        <div class="license-package-price">$59 <span>/ mo</span></div>
+        <div class="license-package-meta">Unlimited staff · annual billing available</div>
+        <div class="license-package-section">Scale</div>
+        <div class="license-package-list">
+          <div class="license-feature-row">Everything in Pro</div>
+          <div class="license-feature-row">Multi-location and branch support</div>
+          <div class="license-feature-row">Bulk import and custom asset fields</div>
+          <div class="license-feature-row">Advanced finance reports</div>
+        </div>
+        <div class="license-package-section">Enterprise</div>
+        <div class="license-package-list">
+          <div class="license-feature-row">Unlimited staff accounts</div>
+          <div class="license-feature-row">API-ready backend setup</div>
+          <div class="license-feature-row">Priority support and SLA path</div>
+          <div class="license-feature-row">White-label ready foundation</div>
+        </div>
+        <div class="license-package-cta">Select Business ↗</div>
       </div>
     </div>
     <div class="license-footer">
