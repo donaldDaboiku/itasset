@@ -121,6 +121,7 @@
     <div class="nav-section">Operations</div>
     <div class="nav-item" data-page="assign"><span class="nav-icon">🔗</span> Assign Device</div>
     <div class="nav-item" data-page="faulty"><span class="nav-icon">⚠️</span> Faulty Tracking</div>
+    <div class="nav-item" data-page="tasks"><span class="nav-icon">📝</span> Task Log</div>
     <div class="nav-item" data-page="history"><span class="nav-icon">📋</span> History Log</div>
     <div class="nav-section">System</div>
     <div class="nav-item" data-page="reports"><span class="nav-icon">📁</span> Reports</div>
@@ -273,6 +274,55 @@
       </div>
     </div>
 
+    <!-- ── TASK LOG ── -->
+    <div id="page-tasks" class="page">
+      <div class="page-hdr">
+        <div><h2>Task Log</h2><p>Record daily staff activities and review performance over time</p></div>
+        <div class="flex-row">
+          <input type="date" id="task-date-filter" style="padding:8px 12px;font-size:13px;width:170px;">
+          <select id="task-period-filter" style="padding:8px 12px;font-size:13px;width:140px;">
+            <option value="all">All Periods</option>
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+            <option value="quarter">This Quarter</option>
+            <option value="year">This Year</option>
+          </select>
+          <select id="task-status-filter" style="padding:8px 12px;font-size:13px;width:150px;">
+            <option value="">All Statuses</option>
+            <option value="planned">Planned</option>
+            <option value="in-progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="blocked">Blocked</option>
+          </select>
+          <input type="text" id="task-search" placeholder="Search staff, title, dept..." style="width:220px;padding:8px 12px;font-size:13px;">
+          <button class="btn btn-outline" onclick="exportTaskLogCSV('all')">📥 Export</button>
+          <button class="btn btn-primary" onclick="openTaskModal()">+ Log Activity</button>
+        </div>
+      </div>
+      <div id="task-log-upgrade-note" class="feature-upgrade-note" style="display:none;margin-bottom:16px;"></div>
+      <div id="task-kpi-grid" class="kpi-grid" style="margin-bottom:18px;">
+        <div class="kpi-card total"><div class="kpi-label">Entries</div><div class="kpi-value" id="task-kpi-total">0</div><div class="kpi-sub">Filtered task logs</div><div class="kpi-icon">📝</div></div>
+        <div class="kpi-card assigned"><div class="kpi-label">Completed</div><div class="kpi-value" id="task-kpi-completed">0</div><div class="kpi-sub">Finished activities</div><div class="kpi-icon">✅</div></div>
+        <div class="kpi-card available"><div class="kpi-label">Hours</div><div class="kpi-value" id="task-kpi-hours">0h</div><div class="kpi-sub">Total duration logged</div><div class="kpi-icon">⏱️</div></div>
+        <div class="kpi-card faulty"><div class="kpi-label">Staff Active</div><div class="kpi-value" id="task-kpi-staff">0</div><div class="kpi-sub">Unique staff in view</div><div class="kpi-icon">👥</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:22px;">
+        <div class="panel">
+          <div class="panel-header"><div class="panel-title">Period Summary</div></div>
+          <div id="task-period-summary"></div>
+          <div class="divider"></div>
+          <div class="panel-title" style="margin-bottom:10px;">Staff Breakdown</div>
+          <div id="task-staff-summary"></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Staff</th><th>Department</th><th>Task</th><th>Category</th><th>Status</th><th>Duration</th><th>Actions</th></tr></thead>
+            <tbody id="task-log-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ── REPORTS ── -->
     <div id="page-reports" class="page">
       <div class="page-hdr"><div><h2>Reports & Exports</h2><p>Export data for analysis and compliance</p></div></div>
@@ -282,8 +332,14 @@
         <div class="report-card" onclick="exportCSV('available')"><div class="report-icon" style="background:var(--accent-glow);">📦</div><div><h4>Available Devices</h4><p>Devices ready for assignment</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
         <div class="report-card" onclick="exportCSV('faulty')"><div class="report-icon" style="background:var(--red-dim);">⚠️</div><div><h4>Faulty Devices</h4><p>All devices marked as faulty for maintenance tracking</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
         <div class="report-card" onclick="exportHistoryCSV()"><div class="report-icon" style="background:var(--orange-dim);">📋</div><div><h4>History / Audit Log</h4><p>Full audit trail of all device activities</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
+        <div class="report-card" onclick="exportTaskLogCSV('week')"><div class="report-icon" style="background:var(--blue-dim);">🗓️</div><div><h4>Weekly Task Report</h4><p>Daily activities logged for the current week</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
+        <div class="report-card" onclick="exportTaskLogCSV('month')"><div class="report-icon" style="background:var(--green-dim);">📅</div><div><h4>Monthly Task Report</h4><p>Staff task activities for the current month</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
+        <div class="report-card" onclick="exportTaskLogCSV('quarter')"><div class="report-icon" style="background:var(--orange-dim);">📈</div><div><h4>Quarterly Task Report</h4><p>Quarter summary for activities, hours and output</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
+        <div class="report-card" onclick="exportTaskLogCSV('year')"><div class="report-icon" style="background:var(--accent-glow);">🗂️</div><div><h4>Yearly Task Report</h4><p>Year-to-date activity log summary</p></div><button class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0;">CSV</button></div>
         <div class="divider"></div>
         <div class="settings-section"><div class="settings-title">📊 Quick Summary</div><div id="report-summary"></div></div>
+        <div class="divider"></div>
+        <div class="settings-section"><div class="settings-title">📝 Task Report Summary</div><div id="task-report-summary"></div></div>
       </div>
     </div>
 
@@ -504,6 +560,29 @@
       </div>
     </div>
     <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('modal-ticket')">Cancel</button><button class="btn btn-primary" onclick="saveTicket()">💾 Save Ticket</button></div>
+  </div>
+</div>
+
+<!-- TASK LOG -->
+<div class="modal-overlay" id="modal-task-log">
+  <div class="modal modal-lg">
+    <h3 id="task-modal-title">📝 Log Daily Activity</h3>
+    <p>Capture staff tasks for weekly, monthly, quarterly and yearly reporting</p>
+    <input type="hidden" id="task-entry-id">
+    <div class="modal-body-scroll">
+      <div class="form-grid">
+        <div class="form-group"><label>Date <span style="color:var(--red)">*</span></label><input type="date" id="tl-date"></div>
+        <div class="form-group"><label>Staff Name <span style="color:var(--red)">*</span></label><input type="text" id="tl-staff" placeholder="Full name"></div>
+        <div class="form-group"><label>Department</label><input type="text" id="tl-dept" placeholder="Department"></div>
+        <div class="form-group"><label>Task Category</label><select id="tl-category"><option value="support">Support</option><option value="maintenance">Maintenance</option><option value="inventory">Inventory</option><option value="deployment">Deployment</option><option value="audit">Audit</option><option value="training">Training</option><option value="admin">Admin</option><option value="other">Other</option></select></div>
+        <div class="form-group"><label>Status</label><select id="tl-status"><option value="completed">Completed</option><option value="in-progress">In Progress</option><option value="planned">Planned</option><option value="blocked">Blocked</option></select></div>
+        <div class="form-group"><label>Duration (hours)</label><input type="number" id="tl-duration" min="0" step="0.25" placeholder="e.g. 2.5"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label>Task Title <span style="color:var(--red)">*</span></label><input type="text" id="tl-title" placeholder="Short summary of the activity"></div>
+        <div class="form-group" style="grid-column:1/-1;"><label>Details</label><textarea id="tl-details" rows="3" placeholder="What was done today?" style="resize:vertical;"></textarea></div>
+        <div class="form-group" style="grid-column:1/-1;"><label>Outcome / Result</label><textarea id="tl-outcome" rows="2" placeholder="Deliverables, blockers cleared, incidents resolved..." style="resize:vertical;"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeModal('modal-task-log')">Cancel</button><button class="btn btn-primary" onclick="saveTaskEntry()">💾 Save Activity</button></div>
   </div>
 </div>
 

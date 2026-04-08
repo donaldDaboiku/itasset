@@ -97,8 +97,22 @@ function formatDate(iso) {
     d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
   );
 }
+function formatDateOnly(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 function dateStamp() {
   return new Date().toISOString().split("T")[0];
+}
+function toDateInputValue(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
 }
 function toast(msg, type = "info") {
   const icon =
@@ -109,6 +123,48 @@ function toast(msg, type = "info") {
   document.getElementById("toast-container").appendChild(t);
   setTimeout(() => (t.style.opacity = "0"), 3000);
   setTimeout(() => t.remove(), 3400);
+}
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function endOfDay(date) {
+  const d = startOfDay(date);
+  d.setDate(d.getDate() + 1);
+  d.setMilliseconds(-1);
+  return d;
+}
+function getWeekBounds(base = new Date()) {
+  const start = startOfDay(base);
+  const day = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - day);
+  const end = endOfDay(start);
+  end.setDate(start.getDate() + 6);
+  return { start, end };
+}
+function getMonthBounds(base = new Date()) {
+  const start = new Date(base.getFullYear(), base.getMonth(), 1);
+  const end = new Date(base.getFullYear(), base.getMonth() + 1, 0, 23, 59, 59, 999);
+  return { start, end };
+}
+function getQuarterBounds(base = new Date()) {
+  const quarterStartMonth = Math.floor(base.getMonth() / 3) * 3;
+  const start = new Date(base.getFullYear(), quarterStartMonth, 1);
+  const end = new Date(base.getFullYear(), quarterStartMonth + 3, 0, 23, 59, 59, 999);
+  return { start, end };
+}
+function getYearBounds(base = new Date()) {
+  const start = new Date(base.getFullYear(), 0, 1);
+  const end = new Date(base.getFullYear(), 11, 31, 23, 59, 59, 999);
+  return { start, end };
+}
+function getBoundsForPeriod(period, base = new Date()) {
+  if (period === "week") return getWeekBounds(base);
+  if (period === "month") return getMonthBounds(base);
+  if (period === "quarter") return getQuarterBounds(base);
+  if (period === "year") return getYearBounds(base);
+  return null;
 }
 
 function normalisePackageId(value) {
@@ -299,6 +355,7 @@ function loadData() {
   try {
     devices = JSON.parse(localStorage.getItem("itassettrack_devices") || "[]");
     history = JSON.parse(localStorage.getItem("itassettrack_history") || "[]");
+    tasks = JSON.parse(localStorage.getItem("itassettrack_tasks") || "[]");
     const s = JSON.parse(localStorage.getItem("itassettrack_settings"));
     if (s) settings = { ...settings, ...s };
   } catch (e) {
@@ -308,6 +365,7 @@ function loadData() {
 function saveDataLocal() {
   localStorage.setItem("itassettrack_devices", JSON.stringify(devices));
   localStorage.setItem("itassettrack_history", JSON.stringify(history));
+  localStorage.setItem("itassettrack_tasks", JSON.stringify(tasks));
   localStorage.setItem("itassettrack_settings", JSON.stringify(settings));
 }
 function saveData() {
@@ -321,6 +379,7 @@ const pageNames = {
   inventory: "Inventory / All Devices",
   assign: "Assign / Reassign Device",
   faulty: "Faulty / Device Tracking",
+  tasks: "Task Log / Daily Activities",
   history: "History / Audit Log",
   reports: "Reports / Exports",
   settings: "Settings / Configuration",
@@ -345,6 +404,7 @@ function navigate(page) {
     renderFaulty();
     refreshFaultySelect();
   }
+  if (page === "tasks") renderTaskLogPage();
   if (page === "assign") {
     refreshAssignSelects();
     renderAssignedList();
@@ -1317,6 +1377,320 @@ function updateDashboard() {
     .join("");
 }
 
+// ── TASK LOG ─────────────────────────────────────────────
+function taskStatusBadge(status) {
+  const meta = {
+    completed: ["var(--green-dim)", "var(--green)", "Completed"],
+    "in-progress": ["var(--blue-dim)", "var(--blue)", "In Progress"],
+    planned: ["var(--surface2)", "var(--text2)", "Planned"],
+    blocked: ["var(--red-dim)", "var(--red)", "Blocked"],
+  };
+  const [bg, color, label] = meta[status] || meta.planned;
+  return `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:999px;background:${bg};color:${color};font-size:10px;font-family:var(--mono);font-weight:700;text-transform:uppercase;letter-spacing:.6px;">${label}</span>`;
+}
+
+function getTaskEntriesForPeriod(period = "all", source = tasks) {
+  if (period === "all") return [...source];
+  const bounds = getBoundsForPeriod(period);
+  if (!bounds) return [...source];
+  return source.filter((task) => {
+    const d = new Date(task.date || task.createdAt || Date.now());
+    return d >= bounds.start && d <= bounds.end;
+  });
+}
+
+function getFilteredTasks(options = {}) {
+  const dateFilter =
+    options.date !== undefined
+      ? options.date
+      : document.getElementById("task-date-filter")?.value || "";
+  const periodFilter =
+    options.period !== undefined
+      ? options.period
+      : document.getElementById("task-period-filter")?.value || "all";
+  const statusFilter =
+    options.status !== undefined
+      ? options.status
+      : document.getElementById("task-status-filter")?.value || "";
+  const search = String(
+    options.search !== undefined
+      ? options.search
+      : document.getElementById("task-search")?.value || "",
+  )
+    .trim()
+    .toLowerCase();
+  let filtered = getTaskEntriesForPeriod(periodFilter, tasks);
+  if (dateFilter) {
+    filtered = filtered.filter(
+      (task) => toDateInputValue(task.date || task.createdAt) === dateFilter,
+    );
+  }
+  if (statusFilter) {
+    filtered = filtered.filter((task) => task.status === statusFilter);
+  }
+  if (search) {
+    filtered = filtered.filter((task) =>
+      [
+        task.staff,
+        task.dept,
+        task.title,
+        task.category,
+        task.details,
+        task.outcome,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(search),
+    );
+  }
+  return filtered.sort(
+    (a, b) =>
+      new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0),
+  );
+}
+
+function renderTaskSummaryCards(filtered) {
+  const total = filtered.length;
+  const completed = filtered.filter((task) => task.status === "completed").length;
+  const hours = filtered.reduce(
+    (sum, task) => sum + (parseFloat(task.durationHours) || 0),
+    0,
+  );
+  const staffCount = new Set(filtered.map((task) => task.staff).filter(Boolean)).size;
+  document.getElementById("task-kpi-total").textContent = total;
+  document.getElementById("task-kpi-completed").textContent = completed;
+  document.getElementById("task-kpi-hours").textContent = `${hours.toFixed(hours % 1 ? 1 : 0)}h`;
+  document.getElementById("task-kpi-staff").textContent = staffCount;
+}
+
+function renderTaskPeriodSummary(filtered) {
+  const period = document.getElementById("task-period-filter")?.value || "all";
+  const summaryEl = document.getElementById("task-period-summary");
+  const staffEl = document.getElementById("task-staff-summary");
+  if (!summaryEl || !staffEl) return;
+  if (!filtered.length) {
+    summaryEl.innerHTML =
+      '<div class="empty-state"><div class="es-icon">📝</div><p>No task entries for this view</p></div>';
+    staffEl.innerHTML =
+      '<div style="font-size:12px;color:var(--text3);">No staff activity to summarise.</div>';
+    return;
+  }
+  const hours = filtered.reduce(
+    (sum, task) => sum + (parseFloat(task.durationHours) || 0),
+    0,
+  );
+  const categories = {};
+  filtered.forEach((task) => {
+    categories[task.category || "other"] =
+      (categories[task.category || "other"] || 0) + 1;
+  });
+  const topCategory = Object.entries(categories).sort((a, b) => b[1] - a[1])[0];
+  summaryEl.innerHTML =
+    `<div class="stat-row"><div class="s-label">Period</div><div class="s-val mono">${escHtml(period === "all" ? "All" : period)}</div></div><div class="stat-row"><div class="s-label">Entries</div><div class="s-val mono">${filtered.length}</div></div><div class="stat-row"><div class="s-label">Hours Logged</div><div class="s-val mono">${hours.toFixed(hours % 1 ? 1 : 0)}h</div></div><div class="stat-row"><div class="s-label">Completed</div><div class="s-val mono" style="color:var(--green);">${filtered.filter((task) => task.status === "completed").length}</div></div><div class="stat-row"><div class="s-label">Top Category</div><div class="s-val mono">${escHtml(topCategory ? topCategory[0] : "—")}</div></div>`;
+  const staffMap = {};
+  filtered.forEach((task) => {
+    const key = task.staff || "Unknown";
+    if (!staffMap[key]) staffMap[key] = { count: 0, hours: 0 };
+    staffMap[key].count += 1;
+    staffMap[key].hours += parseFloat(task.durationHours) || 0;
+  });
+  staffEl.innerHTML = Object.entries(staffMap)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 8)
+    .map(
+      ([staff, info]) =>
+        `<div class="stat-row"><div class="s-label">${escHtml(staff)}</div><div class="s-val mono">${info.count} · ${info.hours.toFixed(info.hours % 1 ? 1 : 0)}h</div></div>`,
+    )
+    .join("");
+}
+
+function renderTaskTable(filtered) {
+  const tbody = document.getElementById("task-log-tbody");
+  if (!tbody) return;
+  if (!filtered.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="8"><div class="empty-state"><div class="es-icon">📝</div><p>No task entries match this filter</p></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered
+    .map(
+      (task) =>
+        `<tr><td class="mono" style="font-size:11px;">${escHtml(formatDateOnly(task.date || task.createdAt))}</td><td style="font-size:13px;font-weight:600;">${escHtml(task.staff)}</td><td style="font-size:12px;">${escHtml(task.dept) || "—"}</td><td><div style="font-size:13px;font-weight:600;">${escHtml(task.title)}</div><div style="font-size:11px;color:var(--text3);">${escHtml(task.outcome || task.details || "—")}</div></td><td><span class="tag" style="text-transform:capitalize;">${escHtml(task.category || "other")}</span></td><td>${taskStatusBadge(task.status)}</td><td class="mono" style="font-size:11px;">${task.durationHours ? escHtml(String(task.durationHours)) + "h" : "—"}</td><td><div class="flex-row" style="gap:4px;flex-wrap:nowrap;"><button class="btn btn-outline btn-sm" onclick="openTaskModal('${escAttr(task.id)}')">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteTaskEntry('${escAttr(task.id)}')">🗑</button></div></td></tr>`,
+    )
+    .join("");
+}
+
+function renderTaskLogPage() {
+  const noteEl = document.getElementById("task-log-upgrade-note");
+  const kpiEl = document.getElementById("task-kpi-grid");
+  if (!noteEl || !kpiEl) return;
+  if (!getCurrentPackage().taskLog) {
+    noteEl.style.display = "block";
+    noteEl.textContent =
+      "Daily activity task logging and weekly, monthly, quarterly, and yearly reporting are available on the subscription packages.";
+    kpiEl.style.display = "none";
+    renderTaskTable([]);
+    renderTaskPeriodSummary([]);
+    return;
+  }
+  noteEl.style.display = "none";
+  kpiEl.style.display = "grid";
+  const filtered = getFilteredTasks();
+  renderTaskSummaryCards(filtered);
+  renderTaskPeriodSummary(filtered);
+  renderTaskTable(filtered);
+}
+
+function openTaskModal(taskId = "") {
+  if (!ensureFeatureAccess("taskLog")) return;
+  const task = taskId ? tasks.find((entry) => entry.id === taskId) : null;
+  const currentUser = getCurrentUser();
+  document.getElementById("task-entry-id").value = task ? task.id : "";
+  document.getElementById("task-modal-title").textContent = task
+    ? "📝 Edit Daily Activity"
+    : "📝 Log Daily Activity";
+  document.getElementById("tl-date").value = toDateInputValue(
+    task ? task.date : new Date(),
+  );
+  document.getElementById("tl-staff").value =
+    task?.staff || currentUser?.name || "";
+  document.getElementById("tl-dept").value =
+    task?.dept || currentUser?.dept || "";
+  document.getElementById("tl-category").value = task?.category || "support";
+  document.getElementById("tl-status").value = task?.status || "completed";
+  document.getElementById("tl-duration").value = task?.durationHours || "";
+  document.getElementById("tl-title").value = task?.title || "";
+  document.getElementById("tl-details").value = task?.details || "";
+  document.getElementById("tl-outcome").value = task?.outcome || "";
+  document.getElementById("modal-task-log").classList.add("open");
+}
+
+function saveTaskEntry() {
+  if (!ensureFeatureAccess("taskLog")) return;
+  const id = document.getElementById("task-entry-id").value;
+  const date = document.getElementById("tl-date").value;
+  const staff = document.getElementById("tl-staff").value.trim();
+  const dept = document.getElementById("tl-dept").value.trim();
+  const category = document.getElementById("tl-category").value;
+  const status = document.getElementById("tl-status").value;
+  const durationHours =
+    parseFloat(document.getElementById("tl-duration").value) || 0;
+  const title = document.getElementById("tl-title").value.trim();
+  const details = document.getElementById("tl-details").value.trim();
+  const outcome = document.getElementById("tl-outcome").value.trim();
+  const currentUser = getCurrentUser();
+  if (!date || !staff || !title) {
+    toast("Date, staff name, and task title are required", "error");
+    return;
+  }
+  const payload = {
+    id: id || "task_" + Date.now(),
+    date,
+    staff,
+    dept,
+    category,
+    status,
+    durationHours,
+    title,
+    details,
+    outcome,
+    updatedAt: new Date().toISOString(),
+    createdBy: currentUser?.username || "system",
+  };
+  if (!id) {
+    tasks.push({ ...payload, createdAt: new Date().toISOString() });
+  } else {
+    const idx = tasks.findIndex((entry) => entry.id === id);
+    if (idx === -1) return;
+    tasks[idx] = { ...tasks[idx], ...payload };
+  }
+  saveData();
+  closeModal("modal-task-log");
+  toast(id ? "Task activity updated" : "Daily activity logged", "success");
+  renderTaskLogPage();
+  renderReportSummary();
+}
+
+function deleteTaskEntry(taskId) {
+  const task = tasks.find((entry) => entry.id === taskId);
+  if (!task) return;
+  showConfirm(
+    "Delete Task Entry?",
+    `This will permanently remove "${task.title}" from the task log.`,
+    () => {
+      tasks = tasks.filter((entry) => entry.id !== taskId);
+      saveData();
+      toast("Task activity deleted", "warning");
+      renderTaskLogPage();
+      renderReportSummary();
+    },
+  );
+}
+
+function exportTaskLogCSV(period = "all") {
+  if (!ensureFeatureAccess("taskLog")) return;
+  const data =
+    period === "all"
+      ? getFilteredTasks()
+      : getFilteredTasks({ period, date: "", search: "", status: "" });
+  const headers = [
+    "Date",
+    "Staff Name",
+    "Department",
+    "Task Title",
+    "Category",
+    "Status",
+    "Duration (Hours)",
+    "Details",
+    "Outcome",
+    "Created By",
+    "Created At",
+    "Updated At",
+  ];
+  const rows = data.map((task) => [
+    formatDateOnly(task.date || task.createdAt),
+    task.staff || "",
+    task.dept || "",
+    task.title || "",
+    task.category || "",
+    task.status || "",
+    task.durationHours || "",
+    task.details || "",
+    task.outcome || "",
+    task.createdBy || "",
+    formatDate(task.createdAt),
+    formatDate(task.updatedAt),
+  ]);
+  downloadCSV(`IT_Task_Log_${period}_${dateStamp()}.csv`, [headers, ...rows]);
+  toast(`Task log exported (${data.length} entries)`, "success");
+}
+
+function renderTaskReportSummary() {
+  const el = document.getElementById("task-report-summary");
+  if (!el) return;
+  if (!getCurrentPackage().taskLog) {
+    el.innerHTML =
+      '<div class="feature-upgrade-note">Task activity reporting is included in the subscription packages.</div>';
+    return;
+  }
+  const summaries = [
+    ["Weekly", getTaskEntriesForPeriod("week")],
+    ["Monthly", getTaskEntriesForPeriod("month")],
+    ["Quarterly", getTaskEntriesForPeriod("quarter")],
+    ["Yearly", getTaskEntriesForPeriod("year")],
+  ];
+  el.innerHTML = summaries
+    .map(([label, entries]) => {
+      const hours = entries.reduce(
+        (sum, task) => sum + (parseFloat(task.durationHours) || 0),
+        0,
+      );
+      const completed = entries.filter((task) => task.status === "completed").length;
+      return `<div class="stat-row"><div class="s-label">${label}</div><div class="s-val mono">${entries.length} entries · ${completed} done · ${hours.toFixed(hours % 1 ? 1 : 0)}h</div></div>`;
+    })
+    .join("");
+}
+
 // ── REPORTS ───────────────────────────────────────────────
 function exportCSV(filter = "all") {
   let data = devices;
@@ -1446,7 +1820,8 @@ function renderReportSummary() {
     available = devices.filter((d) => d.status === "Available").length,
     faulty = devices.filter((d) => d.status === "Faulty").length;
   document.getElementById("report-summary").innerHTML =
-    `<div class="stat-row"><div class="s-label">Total Devices</div><div class="s-val mono">${total}</div></div><div class="stat-row"><div class="s-label">Assigned</div><div class="s-val mono" style="color:var(--green);">${assigned}</div></div><div class="stat-row"><div class="s-label">Available</div><div class="s-val mono" style="color:var(--blue);">${available}</div></div><div class="stat-row"><div class="s-label">Faulty</div><div class="s-val mono" style="color:var(--red);">${faulty}</div></div><div class="stat-row"><div class="s-label">History Records</div><div class="s-val mono">${history.length}</div></div>`;
+    `<div class="stat-row"><div class="s-label">Total Devices</div><div class="s-val mono">${total}</div></div><div class="stat-row"><div class="s-label">Assigned</div><div class="s-val mono" style="color:var(--green);">${assigned}</div></div><div class="stat-row"><div class="s-label">Available</div><div class="s-val mono" style="color:var(--blue);">${available}</div></div><div class="stat-row"><div class="s-label">Faulty</div><div class="s-val mono" style="color:var(--red);">${faulty}</div></div><div class="stat-row"><div class="s-label">History Records</div><div class="s-val mono">${history.length}</div></div><div class="stat-row"><div class="s-label">Task Entries</div><div class="s-val mono">${tasks.length}</div></div>`;
+  renderTaskReportSummary();
 }
 
 // ── SETTINGS ─────────────────────────────────────────────
@@ -1470,6 +1845,15 @@ function updateTagPreview() {
   const el = document.getElementById(id);
   if (el) el.addEventListener("input", updateTagPreview);
 });
+["task-date-filter", "task-period-filter", "task-status-filter", "task-search"].forEach(
+  (id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      const evt = id === "task-search" ? "input" : "change";
+      el.addEventListener(evt, renderTaskLogPage);
+    }
+  },
+);
 function saveSettings() {
   settings.prefix = document.getElementById("s-prefix").value.trim() || "IT";
   settings.start = parseInt(document.getElementById("s-start").value) || 1;
@@ -1502,16 +1886,18 @@ function confirmDelete(id) {
 function confirmClear() {
   showConfirm(
     "Clear All Data?",
-    "This will permanently delete ALL devices, history and reset settings.",
+    "This will permanently delete ALL devices, history, task logs, and reset settings.",
     () => {
       devices = [];
       history = [];
+      tasks = [];
       settings = { prefix: "IT", start: 1, padding: 4, counter: 1 };
       saveData();
       toast("All data cleared", "warning");
       loadSettingsForm();
       renderInventory();
       updateDashboard();
+      renderTaskLogPage();
       renderHistory();
       renderFaulty();
       refreshAssignSelects();
@@ -1656,6 +2042,7 @@ async function pullFromSheets() {
     if (data.devices !== undefined) {
       devices = data.devices || [];
       history = data.history || [];
+      tasks = data.tasks || [];
       settings = { ...settings, ...(data.settings || {}) };
       saveDataLocal();
       lastSyncTime = new Date().toISOString();
@@ -1682,7 +2069,7 @@ async function pushToSheets() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         action: "write",
-        data: JSON.stringify({ devices, history, settings }),
+        data: JSON.stringify({ devices, history, tasks, settings }),
       }).toString(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1704,6 +2091,8 @@ async function doSyncNow() {
   if (ok) {
     renderInventory();
     updateDashboard();
+    renderTaskLogPage();
+    renderReportSummary();
     renderHistory();
     renderFaulty();
     refreshAssignSelects();
@@ -2398,6 +2787,7 @@ function doSignOut() {
   clearCurrentUser();
   devices = [];
   history = [];
+  tasks = [];
   settings = { prefix: "IT", start: 1, padding: 4, counter: 1 };
   if (dashChart) {
     dashChart.destroy();
@@ -3768,6 +4158,7 @@ function initApp() {
   refreshAuthPackageUI();
   updateDashboard();
   renderInventory();
+  renderTaskLogPage();
   renderHistory();
   renderFaulty();
   refreshAssignSelects();
@@ -3783,6 +4174,8 @@ function initApp() {
       if (ok) {
         renderInventory();
         updateDashboard();
+        renderTaskLogPage();
+        renderReportSummary();
       }
     });
     startAutoSync();
