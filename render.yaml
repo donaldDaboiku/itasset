@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: itassettrack
+    runtime: node
+    plan: starter
+    region: ohio
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 23.11.1
+      - key: ITASSET_DB_DIR
+        value: /opt/render/project/src/data
+      - key: ITASSET_SYNC_TOKEN
+        sync: false
+      - key: ITASSET_ALLOWED_ORIGIN
+        sync: false
+    disk:
+      name: itassettrack-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

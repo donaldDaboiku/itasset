@@ -67,7 +67,12 @@ function applyCors(req, res) {
 }
 
 function json(req, res, status, payload) {
-  res.status(status).setHeader("Content-Type", "application/json");
+  if (typeof res.status === "function") {
+    res.status(status);
+  } else {
+    res.statusCode = status;
+  }
+  res.setHeader("Content-Type", "application/json");
   applyCors(req, res);
   res.end(JSON.stringify(payload));
 }

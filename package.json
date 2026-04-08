@@ -1,0 +1,12 @@
+{
+  "name": "itassettrack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ITAssetTrack with built-in SQLite backend",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=23.11.1"
+  }
+}
