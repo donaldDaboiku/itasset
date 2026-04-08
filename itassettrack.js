@@ -10,6 +10,7 @@ let confirmCallback = null;
 let lastConnectivity = null;
 let connectivityTimer = null;
 let sheetsConfig = null;
+let backendConfig = null;
 let syncStatus = "local";
 let lastSyncTime = null;
 let syncInterval = null;
@@ -29,6 +30,7 @@ const TRIAL_DAYS = 7;
 const LICENSE_KEY = "itassettrack_license";
 const TRIAL_KEY = "itassettrack_trial_start";
 const SHEETS_CONFIG_KEY = "itassettrack_sheets_config";
+const BACKEND_CONFIG_KEY = "itassettrack_backend_config";
 const DEFAULT_PACKAGE_ID = "unlimited";
 const PACKAGE_DEFS = {
   starter: {
@@ -370,7 +372,7 @@ function saveDataLocal() {
 }
 function saveData() {
   saveDataLocal();
-  if (getSheetsUrl()) pushToSheets();
+  if (getSyncUrl()) pushToSheets();
 }
 
 // ── NAVIGATION ────────────────────────────────────────────
@@ -412,6 +414,7 @@ function navigate(page) {
   if (page === "reports") renderReportSummary();
   if (page === "settings") {
     renderPlanSettings();
+    renderBackendSettings();
     renderSheetsSettings();
     renderTeamUserList();
     applyRoleUI();
@@ -1983,15 +1986,52 @@ function loadSheetsConfig() {
   } catch (e) {
     sheetsConfig = null;
   }
+  try {
+    backendConfig = JSON.parse(localStorage.getItem(BACKEND_CONFIG_KEY));
+  } catch (e) {
+    backendConfig = null;
+  }
   updateSyncBar();
 }
 function saveSheetsConfig(cfg) {
   sheetsConfig = cfg;
   localStorage.setItem(SHEETS_CONFIG_KEY, JSON.stringify(cfg));
 }
-function getSheetsUrl() {
+function saveBackendConfig(cfg) {
+  backendConfig = cfg;
+  localStorage.setItem(BACKEND_CONFIG_KEY, JSON.stringify(cfg));
+  updateSyncBar();
+}
+function getBackendUrl() {
   if (!getCurrentPackage().sheetsSync) return null;
+  return backendConfig && backendConfig.apiUrl ? backendConfig.apiUrl : null;
+}
+function getSheetsUrl() {
   return sheetsConfig && sheetsConfig.scriptUrl ? sheetsConfig.scriptUrl : null;
+}
+function getSyncProvider() {
+  if (!getCurrentPackage().sheetsSync) return null;
+  const backendUrl = getBackendUrl();
+  if (backendUrl) {
+    return {
+      id: "backend",
+      name: "Backend Database",
+      url: backendUrl,
+    };
+  }
+  const sheetsUrl = getSheetsUrl();
+  if (sheetsUrl) {
+    return {
+      id: "sheets",
+      name: "Google Sheets",
+      url: sheetsUrl,
+    };
+  }
+  return null;
+}
+function getSyncUrl() {
+  const provider = getSyncProvider();
+  return provider ? provider.url : null;
 }
 function updateSyncBar() {
   const dot = document.getElementById("sync-dot");
@@ -2003,15 +2043,16 @@ function updateSyncBar() {
     timeEl.textContent = "";
     return;
   }
-  if (!getSheetsUrl()) {
+  const provider = getSyncProvider();
+  if (!provider) {
     dot.className = "sync-dot local";
-    txt.textContent = "Google Sheets: Not configured — running locally";
+    txt.textContent = "Shared sync: Not configured — running locally";
     timeEl.textContent = "";
     return;
   }
   const states = {
     local: ["local", "Local mode"],
-    online: ["online", "Synced with Google Sheets"],
+    online: ["online", `Synced with ${provider.name}`],
     syncing: ["syncing", "Syncing…"],
     offline: ["offline", "Sync failed — check connection"],
   };
@@ -2028,7 +2069,8 @@ function setSyncStatus(s) {
 }
 async function pullFromSheets() {
   if (!ensureFeatureAccess("sheetsSync")) return false;
-  const url = getSheetsUrl();
+  const provider = getSyncProvider();
+  const url = provider ? provider.url : null;
   if (!url || isSyncing) return false;
   isSyncing = true;
   setSyncStatus("syncing");
@@ -2044,6 +2086,8 @@ async function pullFromSheets() {
       history = data.history || [];
       tasks = data.tasks || [];
       settings = { ...settings, ...(data.settings || {}) };
+      if (data.users !== undefined)
+        saveUsers(data.users || [...DEFAULT_USERS], false);
       saveDataLocal();
       lastSyncTime = new Date().toISOString();
       setSyncStatus("online");
@@ -2059,7 +2103,8 @@ async function pullFromSheets() {
 }
 async function pushToSheets() {
   if (!ensureFeatureAccess("sheetsSync")) return false;
-  const url = getSheetsUrl();
+  const provider = getSyncProvider();
+  const url = provider ? provider.url : null;
   if (!url) return false;
   setSyncStatus("syncing");
   try {
@@ -2069,7 +2114,13 @@ async function pushToSheets() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         action: "write",
-        data: JSON.stringify({ devices, history, tasks, settings }),
+        data: JSON.stringify({
+          devices,
+          history,
+          tasks,
+          settings,
+          users: getUsers(),
+        }),
       }).toString(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2097,12 +2148,12 @@ async function doSyncNow() {
     renderFaulty();
     refreshAssignSelects();
     updateFaultyBadge();
-    toast("Synced with Google Sheets", "success");
+    toast("Shared data synced", "success");
   } else toast("Sync failed — check URL or connection", "error");
 }
 function startAutoSync() {
   if (!getCurrentPackage().sheetsSync) return;
-  if (!getSheetsUrl()) return;
+  if (!getSyncUrl()) return;
   if (syncInterval) clearInterval(syncInterval);
   syncInterval = setInterval(async () => {
     const ok = await pullFromSheets();
@@ -2121,11 +2172,64 @@ function disconnectSheets() {
   renderSheetsSettings();
   toast("Google Sheets disconnected", "warning");
 }
+function disconnectBackend() {
+  if (syncInterval) clearInterval(syncInterval);
+  syncInterval = null;
+  localStorage.removeItem(BACKEND_CONFIG_KEY);
+  backendConfig = null;
+  setSyncStatus("local");
+  renderBackendSettings();
+  toast("Backend database disconnected", "warning");
+}
+function saveBackendSettings() {
+  const raw = document.getElementById("backend-api-url")?.value.trim() || "";
+  if (!raw) {
+    toast("Enter a backend API URL", "error");
+    return;
+  }
+  if (!/^https?:\/\//i.test(raw) && !raw.startsWith("/")) {
+    toast("Use an absolute URL or a same-host path like /api/data", "error");
+    return;
+  }
+  saveBackendConfig({ apiUrl: raw, configuredAt: new Date().toISOString() });
+  renderBackendSettings();
+  updateSyncBar();
+  toast("Backend database configured", "success");
+}
+function useBuiltinBackend() {
+  saveBackendConfig({
+    apiUrl: "/api/data",
+    configuredAt: new Date().toISOString(),
+    mode: "builtin-sqlite",
+  });
+  renderBackendSettings();
+  updateSyncBar();
+  toast("Built-in database endpoint enabled", "success");
+}
+function renderBackendSettings() {
+  const el = document.getElementById("backend-settings-content");
+  if (!el) return;
+  if (!getCurrentPackage().sheetsSync) {
+    el.innerHTML =
+      '<div class="feature-upgrade-note">Shared backend database sync is available on the subscription packages.</div>';
+    return;
+  }
+  const url = getBackendUrl();
+  if (url) {
+    el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Backend Database Connected</div><div style="font-size:11px;color:var(--text2);font-family:var(--mono);">${escHtml(url)}</div></div></div><div class="flex-row"><button class="btn btn-outline" onclick="doSyncNow()">📥 Pull Now</button><button class="btn btn-outline" onclick="pushToSheets().then(ok=>toast(ok?'Pushed!':'Push failed',ok?'success':'error'))">📤 Push Now</button><button class="btn btn-danger" onclick="disconnectBackend()">🔌 Disconnect</button></div><div class="plan-note">This mode uses the server API instead of Google Sheets. If this app is deployed together with the API, the recommended URL is <span class="mono">/api/data</span>.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">🗄️</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">No Backend Database Yet</div><div style="font-size:11px;color:var(--text2);">Use the built-in SQLite API or point to another backend endpoint.</div></div></div><div class="form-grid" style="margin-bottom:12px;"><div class="form-group" style="grid-column:1/-1;"><label>Backend API URL</label><input type="text" id="backend-api-url" value="${escAttr(backendConfig?.apiUrl || "")}" placeholder="/api/data" style="font-family:var(--mono);font-size:12px;"></div></div><div class="flex-row"><button class="btn btn-primary" onclick="useBuiltinBackend()">⚡ Use Built-in DB</button><button class="btn btn-outline" onclick="saveBackendSettings()">💾 Save URL</button></div><div class="plan-note">Backend sync is preferred over Google Sheets when both are configured. This lets us move to a real database without changing the frontend again.</div>`;
+}
 function renderSheetsSettings() {
   const el = document.getElementById("sheets-settings-content");
   if (!el) return;
   if (!getCurrentPackage().sheetsSync) {
     el.innerHTML = `<div class="feature-upgrade-note">Starter runs fully offline on one machine. Upgrade to a subscription package to unlock shared Google Sheets sync and server-backed collaboration.${sheetsConfig && sheetsConfig.scriptUrl ? " Your saved sync URL will remain stored until you upgrade." : ""}</div>`;
+    return;
+  }
+  if (getBackendUrl()) {
+    el.innerHTML = `<div class="plan-note">Google Sheets is available as a fallback, but backend database sync is currently active and will be used first.</div><div class="flex-row"><button class="btn btn-outline" onclick="openSetupWizard()">⚙ Configure Sheets Fallback</button>${sheetsConfig?.scriptUrl ? `<button class="btn btn-danger" onclick="disconnectSheets()">🔌 Disconnect Sheets</button>` : ""}</div>`;
     return;
   }
   const url = getSheetsUrl();
@@ -2147,7 +2251,7 @@ function handleRequest(e){
   if(action==='read'){
     var ds=sheet.getSheetByName('ITData')||sheet.insertSheet('ITData');
     var cell=ds.getRange('A1').getValue();
-    var data=cell?JSON.parse(cell):{devices:[],history:[],settings:{}};
+    var data=cell?JSON.parse(cell):{devices:[],history:[],tasks:[],users:[],settings:{}};
     return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
   }
   if(action==='write'){
@@ -2257,8 +2361,9 @@ function getUsers() {
     return [...DEFAULT_USERS];
   }
 }
-function saveUsers(u) {
+function saveUsers(u, syncRemote = true) {
   localStorage.setItem("itassettrack_users", JSON.stringify(u));
+  if (syncRemote && getSyncUrl()) pushToSheets();
 }
 function getCurrentUser() {
   try {
@@ -4165,6 +4270,7 @@ function initApp() {
   refreshFaultySelect();
   renderReportSummary();
   updateFaultyBadge();
+  renderBackendSettings();
   renderSheetsSettings();
   applyRoleUI();
   renderTeamUserList();
