@@ -15,6 +15,7 @@ let syncStatus = "local";
 let lastSyncTime = null;
 let syncInterval = null;
 let isSyncing = false;
+let lastSyncError = "";
 
 // import state
 let importRawRows = [],
@@ -2194,6 +2195,9 @@ function getBackendSyncToken() {
 function getSheetsUrl() {
   return sheetsConfig && sheetsConfig.scriptUrl ? sheetsConfig.scriptUrl : null;
 }
+function getSheetsSyncSecret() {
+  return sheetsConfig && sheetsConfig.syncSecret ? sheetsConfig.syncSecret : "";
+}
 function getSyncProvider() {
   if (!getCurrentPackage().sheetsSync) return null;
   const backendUrl = getBackendUrl();
@@ -2217,6 +2221,21 @@ function getSyncProvider() {
 function getSyncUrl() {
   const provider = getSyncProvider();
   return provider ? provider.url : null;
+}
+function buildSheetsUrl(url, params = {}) {
+  const fullUrl = new URL(url, location.href);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      fullUrl.searchParams.set(key, value);
+    }
+  });
+  return fullUrl.toString();
+}
+function getSheetsRequestParams() {
+  return {
+    auth: getSheetsSyncSecret(),
+    v: Date.now().toString(),
+  };
 }
 function getSyncHeaders(provider, includeContentType = false) {
   const headers = {};
@@ -2270,13 +2289,18 @@ async function pullFromSheets() {
   isSyncing = true;
   setSyncStatus("syncing");
   try {
-    const res = await fetch(`${url}?action=read&v=${Date.now()}`, {
+    const requestUrl =
+      provider && provider.id === "sheets"
+        ? buildSheetsUrl(url, { action: "read", ...getSheetsRequestParams() })
+        : `${url}?action=read&v=${Date.now()}`;
+    const res = await fetch(requestUrl, {
       method: "GET",
       mode: "cors",
       headers: getSyncHeaders(provider),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
     if (data.devices !== undefined) {
       devices = data.devices || [];
       history = data.history || [];
@@ -2288,10 +2312,13 @@ async function pullFromSheets() {
       lastSyncTime = new Date().toISOString();
       setSyncStatus("online");
       isSyncing = false;
+      lastSyncError = "";
       return true;
     }
     throw new Error("Invalid response");
   } catch (err) {
+    lastSyncError = err && err.message ? err.message : "Sync failed";
+    console.warn("Google/backend pull failed:", lastSyncError);
     setSyncStatus("offline");
     isSyncing = false;
     return false;
@@ -2305,30 +2332,37 @@ async function pushToSheets() {
   if (!url) return false;
   setSyncStatus("syncing");
   try {
+    const body = new URLSearchParams({
+      action: "write",
+      data: JSON.stringify({
+        devices,
+        history,
+        tasks,
+        settings,
+        users: sanitizeUsersForSync(getUsers()),
+      }),
+    });
+    if (provider && provider.id === "sheets" && getSheetsSyncSecret()) {
+      body.set("auth", getSheetsSyncSecret());
+    }
     const res = await fetch(url, {
       method: "POST",
       mode: "cors",
       headers: getSyncHeaders(provider, true),
-      body: new URLSearchParams({
-        action: "write",
-        data: JSON.stringify({
-          devices,
-          history,
-          tasks,
-          settings,
-          users: sanitizeUsersForSync(getUsers()),
-        }),
-      }).toString(),
+      body: body.toString(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const result = await res.json();
     if (result.ok) {
       lastSyncTime = new Date().toISOString();
       setSyncStatus("online");
+      lastSyncError = "";
       return true;
     }
     throw new Error(result.error || "Write failed");
   } catch (err) {
+    lastSyncError = err && err.message ? err.message : "Sync failed";
+    console.warn("Google/backend push failed:", lastSyncError);
     setSyncStatus("offline");
     return false;
   }
@@ -2346,7 +2380,7 @@ async function doSyncNow() {
     refreshAssignSelects();
     updateFaultyBadge();
     toast("Shared data synced", "success");
-  } else toast("Sync failed — check URL or connection", "error");
+  } else toast(`Sync failed — ${lastSyncError || "check URL, secret, or connection"}`, "error");
 }
 function startAutoSync() {
   if (!getCurrentPackage().sheetsSync) return;
@@ -2449,7 +2483,7 @@ function renderSheetsSettings() {
   }
   const url = getSheetsUrl();
   if (url) {
-    el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">✅</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Connected to Google Sheets</div><div style="font-size:11px;color:var(--text2);font-family:var(--mono);">${escHtml(url.substring(0, 55))}…</div></div></div><div class="flex-row"><button class="btn btn-outline" onclick="doSyncNow()">📥 Pull Now</button><button class="btn btn-outline" onclick="pushToSheets().then(ok=>toast(ok?'Pushed!':'Push failed',ok?'success':'error'))">📤 Push Now</button><button class="btn btn-danger" onclick="disconnectSheets()">🔌 Disconnect</button></div>`;
+    el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">✅</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Connected to Google Sheets</div><div style="font-size:11px;color:var(--text2);font-family:var(--mono);">${escHtml(url.substring(0, 55))}…</div><div style="font-size:11px;color:var(--text3);margin-top:4px;">Secret: ${getSheetsSyncSecret() ? "Configured" : "Not set"}</div></div></div><div class="flex-row"><button class="btn btn-outline" onclick="doSyncNow()">📥 Pull Now</button><button class="btn btn-outline" onclick="pushToSheets().then(ok=>toast(ok?'Pushed!':('Push failed: ' + (lastSyncError || 'check secret')),ok?'success':'error'))">📤 Push Now</button><button class="btn btn-outline" onclick="openSetupWizard()">⚙ Reconfigure</button><button class="btn btn-danger" onclick="disconnectSheets()">🔌 Disconnect</button></div>`;
   } else {
     el.innerHTML = `<div class="sheets-status-card"><div style="font-size:28px;">📊</div><div><div style="font-size:13px;font-weight:600;color:var(--text);">Not Connected</div><div style="font-size:11px;color:var(--text2);">Connect to sync data across devices</div></div></div><button class="btn btn-primary" onclick="openSetupWizard()">🔗 Connect Google Sheets</button>`;
   }
@@ -2458,31 +2492,192 @@ function renderSheetsSettings() {
 // ── SETUP WIZARD ──────────────────────────────────────────
 let setupStep = 1;
 const TOTAL_STEPS = 4;
-const APPS_SCRIPT_CODE = `function doGet(e){return handleRequest(e);}
+function escapeSingleQuotedJs(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+function buildAppsScriptCode(secret = "CHANGE_ME_SYNC_SECRET") {
+  const safeSecret = escapeSingleQuotedJs(secret || "CHANGE_ME_SYNC_SECRET");
+  return `var SYNC_SECRET='${safeSecret}';
+var TAB_NAMES={
+  devices:'Devices',
+  history:'History',
+  tasks:'Tasks',
+  users:'Users',
+  settings:'Settings',
+  meta:'Meta'
+};
+function jsonOut(payload){
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
+}
+function isAuthorized(e){
+  var provided=(e.parameter&&e.parameter.auth)||'';
+  return !!provided && provided===SYNC_SECRET;
+}
+function safeParse(text,fallback){
+  try{return JSON.parse(text);}catch(err){return fallback;}
+}
+function ensureSheet(book,name,headers){
+  var sh=book.getSheetByName(name)||book.insertSheet(name);
+  sh.clearContents();
+  sh.getRange(1,1,1,headers.length).setValues([headers]);
+  return sh;
+}
+function getSheet(book,name,headers){
+  var sh=book.getSheetByName(name)||book.insertSheet(name);
+  if(sh.getLastRow()===0){
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+  }
+  return sh;
+}
+function deriveRowId(prefix,row,index){
+  if(row&&row.id){return String(row.id);}
+  var base=[prefix,index,row&&(row.date||row.username||row.serial||row.staff),row&&(row.action||row.title||row.name||row.tag)].filter(Boolean).join('_');
+  return base||prefix+'_'+index;
+}
+function writeCollection(book,name,prefix,rows){
+  var sh=ensureSheet(book,name,['id','sortOrder','updatedAt','json']);
+  if(!rows.length){return sh;}
+  var values=rows.map(function(row,index){
+    return [
+      deriveRowId(prefix,row,index),
+      index,
+      (row&&(row.updatedAt||row.lastLogin||row.date))||'',
+      JSON.stringify(row||{})
+    ];
+  });
+  sh.getRange(2,1,values.length,4).setValues(values);
+  return sh;
+}
+function readCollection(book,name){
+  var sh=getSheet(book,name,['id','sortOrder','updatedAt','json']);
+  if(sh.getLastRow()<2){return [];}
+  return sh
+    .getRange(2,1,sh.getLastRow()-1,4)
+    .getValues()
+    .filter(function(row){return row[0]||row[3];})
+    .sort(function(a,b){return Number(a[1]||0)-Number(b[1]||0);})
+    .map(function(row){return safeParse(row[3],{});});
+}
+function writeSettings(book,settings){
+  var sh=ensureSheet(book,TAB_NAMES.settings,['key','value']);
+  var keys=Object.keys(settings||{}).sort();
+  if(!keys.length){return sh;}
+  var values=keys.map(function(key){
+    return [key,JSON.stringify(settings[key])];
+  });
+  sh.getRange(2,1,values.length,2).setValues(values);
+  return sh;
+}
+function readSettings(book){
+  var sh=getSheet(book,TAB_NAMES.settings,['key','value']);
+  if(sh.getLastRow()<2){return {};}
+  return sh
+    .getRange(2,1,sh.getLastRow()-1,2)
+    .getValues()
+    .filter(function(row){return row[0];})
+    .reduce(function(acc,row){
+      acc[row[0]]=safeParse(row[1],row[1]);
+      return acc;
+    },{});
+}
+function writeMeta(book,lastSync){
+  var sh=ensureSheet(book,TAB_NAMES.meta,['key','value']);
+  sh.getRange(2,1,2,2).setValues([
+    ['last_sync',lastSync],
+    ['layout','split-tabs-v1']
+  ]);
+  return sh;
+}
+function readMeta(book){
+  var sh=getSheet(book,TAB_NAMES.meta,['key','value']);
+  if(sh.getLastRow()<2){return {};}
+  return sh
+    .getRange(2,1,sh.getLastRow()-1,2)
+    .getValues()
+    .filter(function(row){return row[0];})
+    .reduce(function(acc,row){
+      acc[row[0]]=row[1];
+      return acc;
+    },{});
+}
+function readLegacySnapshot(book){
+  var legacy=book.getSheetByName('ITData');
+  if(!legacy){return null;}
+  var cell=legacy.getRange('A1').getValue();
+  return cell?safeParse(cell,null):null;
+}
+function doGet(e){return handleRequest(e);}
 function doPost(e){return handleRequest(e);}
 function handleRequest(e){
-  var sheet=SpreadsheetApp.getActiveSpreadsheet();
-  var action=(e.parameter&&e.parameter.action)||'read';
-  if(action==='read'){
-    var ds=sheet.getSheetByName('ITData')||sheet.insertSheet('ITData');
-    var cell=ds.getRange('A1').getValue();
-    var data=cell?JSON.parse(cell):{devices:[],history:[],tasks:[],users:[],settings:{}};
-    return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
+  try{
+    if(!isAuthorized(e)){return jsonOut({error:'Unauthorized'});}
+    var book=SpreadsheetApp.getActiveSpreadsheet();
+    var action=(e.parameter&&e.parameter.action)||'read';
+    var meta=readMeta(book);
+    if(action==='health'){
+      return jsonOut({ok:true,service:'google-sheets-sync',layout:meta.layout||'split-tabs-v1',updatedAt:meta.last_sync||''});
+    }
+    if(action==='read'){
+      var payload={
+        devices:readCollection(book,TAB_NAMES.devices),
+        history:readCollection(book,TAB_NAMES.history),
+        tasks:readCollection(book,TAB_NAMES.tasks),
+        users:readCollection(book,TAB_NAMES.users),
+        settings:readSettings(book)
+      };
+      if(!payload.devices.length&&!payload.history.length&&!payload.tasks.length&&!payload.users.length&&!Object.keys(payload.settings).length){
+        var legacy=readLegacySnapshot(book);
+        if(legacy){return jsonOut(legacy);}
+      }
+      return jsonOut(payload);
+    }
+    if(action==='write'){
+      var incoming=JSON.parse((e.parameter&&e.parameter.data)||'{}');
+      var now=new Date().toISOString();
+      writeCollection(book,TAB_NAMES.devices,'device',Array.isArray(incoming.devices)?incoming.devices:[]);
+      writeCollection(book,TAB_NAMES.history,'history',Array.isArray(incoming.history)?incoming.history:[]);
+      writeCollection(book,TAB_NAMES.tasks,'task',Array.isArray(incoming.tasks)?incoming.tasks:[]);
+      writeCollection(book,TAB_NAMES.users,'user',Array.isArray(incoming.users)?incoming.users:[]);
+      writeSettings(book,incoming.settings||{});
+      writeMeta(book,now);
+      return jsonOut({ok:true,layout:'split-tabs-v1',updatedAt:now});
+    }
+    return jsonOut({error:'Unknown action'});
+  }catch(err){
+    return jsonOut({error:err && err.message ? err.message : String(err)});
   }
-  if(action==='write'){
-    var ds=sheet.getSheetByName('ITData')||sheet.insertSheet('ITData');
-    var incoming=JSON.parse(e.parameter.data||'{}');
-    ds.getRange('A1').setValue(JSON.stringify(incoming));
-    ds.getRange('B1').setValue(new Date().toISOString());
-    return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
-  }
-  return ContentService.createTextOutput(JSON.stringify({error:'Unknown action'})).setMimeType(ContentService.MimeType.JSON);
 }`;
+}
+function getSheetsSetupSecretInput() {
+  return document.getElementById("setup-sync-secret")?.value.trim() || "";
+}
+function updateSetupCodePreview() {
+  const preview = document.getElementById("setup-code-preview");
+  if (!preview) return;
+  const secret = getSheetsSetupSecretInput() || "CHANGE_ME_SYNC_SECRET";
+  const code = buildAppsScriptCode(secret).split("\n").slice(0, 10).join("\n");
+  preview.textContent = `${code}\n...`;
+}
+function isValidAppsScriptUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    if (parsed.hostname !== "script.google.com") return false;
+    return /\/macros\/s\/[^/]+\/(exec|dev)\/?$/i.test(parsed.pathname);
+  } catch (error) {
+    return false;
+  }
+}
 
 function openSetupWizard() {
   if (!ensureFeatureAccess("sheetsSync")) return;
   setupStep = 1;
+  const secretInput = document.getElementById("setup-sync-secret");
+  if (secretInput) {
+    secretInput.value = getSheetsSyncSecret();
+  }
   renderSetupStep();
+  updateSetupCodePreview();
   document.getElementById("setup-overlay").classList.add("open");
 }
 function renderSetupStep() {
@@ -2500,13 +2695,29 @@ function renderSetupStep() {
   });
 }
 function setupNext() {
-  if (setupStep === 3) {
-    const url = document.getElementById("setup-script-url").value.trim();
-    if (!url.startsWith("https://")) {
-      toast("Please enter a valid Google Apps Script URL", "error");
+  if (setupStep === 2) {
+    const secret = getSheetsSetupSecretInput();
+    if (!secret || secret.length < 8) {
+      toast("Enter a Google sync secret with at least 8 characters", "error");
       return;
     }
-    saveSheetsConfig({ scriptUrl: url, setupAt: new Date().toISOString() });
+  }
+  if (setupStep === 3) {
+    const url = document.getElementById("setup-script-url").value.trim();
+    const syncSecret = getSheetsSetupSecretInput();
+    if (!isValidAppsScriptUrl(url)) {
+      toast("Paste the deployed Apps Script Web App URL, for example https://script.google.com/macros/s/.../exec", "error");
+      return;
+    }
+    if (!syncSecret || syncSecret.length < 8) {
+      toast("Google sync secret is missing. Go back to Step 2 and set it.", "error");
+      return;
+    }
+    saveSheetsConfig({
+      scriptUrl: url,
+      syncSecret,
+      setupAt: new Date().toISOString(),
+    });
   }
   if (setupStep < TOTAL_STEPS) {
     setupStep++;
@@ -2532,12 +2743,15 @@ function setupBack() {
   }
 }
 function copyScriptCode() {
+  const code = buildAppsScriptCode(
+    getSheetsSetupSecretInput() || "CHANGE_ME_SYNC_SECRET",
+  );
   navigator.clipboard
-    .writeText(APPS_SCRIPT_CODE)
+    .writeText(code)
     .then(() => toast("Apps Script code copied!", "success"))
     .catch(() => {
       const ta = document.createElement("textarea");
-      ta.value = APPS_SCRIPT_CODE;
+      ta.value = code;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
@@ -2545,6 +2759,9 @@ function copyScriptCode() {
       toast("Code copied!", "success");
     });
 }
+document
+  .getElementById("setup-sync-secret")
+  ?.addEventListener("input", updateSetupCodePreview);
 
 // ── AUTH / USER MANAGEMENT ────────────────────────────────
 const DEFAULT_USERS = [
